@@ -13,6 +13,9 @@ target_sources(Core PRIVATE
   src/ZInflate.c
   src/Compression.cxx
   src/RZip.cxx
+  src/bitshuffle.c
+  src/bitshuffle_core.c
+  src/iochain.c
 )
 
 target_link_libraries(Core PRIVATE ZLIB::ZLIB)
