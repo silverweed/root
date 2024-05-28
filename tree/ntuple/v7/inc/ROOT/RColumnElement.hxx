@@ -173,17 +173,17 @@ static void CastSplitUnpack(void *destination, const void *source, std::size_t c
 template <typename DestT, typename SourceT>
 static void BitshufflePack(void *destination, const void *source, std::size_t count)
 {
-   // TODO: blocksize?
    // TODO: byte swap?
-   bshuf_bitshuffle(source, destination, count, sizeof(SourceT), 0);
+   auto blockSize = count * sizeof(SourceT);
+   bshuf_bitshuffle(source, destination, count, sizeof(SourceT), blockSize);
 }
 
 template <typename DestT, typename SourceT>
 static void BitshuffleUnpack(void *destination, const void *source, std::size_t count)
 {
-   // TODO: blocksize?
    // TODO: byte swap?
-   bshuf_bitunshuffle(source, destination, count, sizeof(SourceT), 0);
+   auto blockSize = count * sizeof(SourceT);
+   bshuf_bitunshuffle(source, destination, count, sizeof(SourceT), blockSize);
 }
 
 /// \brief Packing of columns with delta + split encoding
@@ -668,6 +668,9 @@ public:
    }
 };
 
+#define BITSHUFFLE 1
+
+#if BITSHUFFLE
 template <>
 class RColumnElement<float, EColumnType::kSplitReal32> : public RColumnElementBase {
 public:
@@ -691,6 +694,7 @@ public:
    void Pack(void *dst, void *src, std::size_t count) const final { BitshufflePack<double, double>(dst, src, count); }
    void Unpack(void *dst, void *src, std::size_t count) const final { BitshuffleUnpack<double, double>(dst, src, count); }
 };
+#endif
 
 #define __RCOLUMNELEMENT_SPEC_BODY(CppT, BaseT, BitsOnStorage)  \
    static constexpr std::size_t kSize = sizeof(CppT);           \
@@ -783,10 +787,14 @@ DECLARE_RCOLUMNELEMENT_SPEC(std::uint64_t, EColumnType::kSplitInt64, 64, RColumn
                             <std::uint64_t, std::int64_t>);
 
 DECLARE_RCOLUMNELEMENT_SPEC(float, EColumnType::kReal32, 32, RColumnElementLE, <float>);
-// DECLARE_RCOLUMNELEMENT_SPEC(float, EColumnType::kSplitReal32, 32, RColumnElementSplitLE, <float, float>);
+#if !BITSHUFFLE
+DECLARE_RCOLUMNELEMENT_SPEC(float, EColumnType::kSplitReal32, 32, RColumnElementSplitLE, <float, float>);
+#endif
 
 DECLARE_RCOLUMNELEMENT_SPEC(double, EColumnType::kReal64, 64, RColumnElementLE, <double>);
-// DECLARE_RCOLUMNELEMENT_SPEC(double, EColumnType::kSplitReal64, 64, RColumnElementSplitLE, <double, double>);
+#if !BITSHUFFLE
+DECLARE_RCOLUMNELEMENT_SPEC(double, EColumnType::kSplitReal64, 64, RColumnElementSplitLE, <double, double>);
+#endif
 DECLARE_RCOLUMNELEMENT_SPEC(double, EColumnType::kReal32, 32, RColumnElementCastLE, <double, float>);
 DECLARE_RCOLUMNELEMENT_SPEC(double, EColumnType::kSplitReal32, 32, RColumnElementSplitLE, <double, float>);
 
