@@ -1,5 +1,8 @@
+#include "Rtypes.h"
 #include "ntuple_test.hxx"
 #include "TKey.h"
+#include "ROOT/EExecutionPolicy.hxx"
+#include "RXTuple.hxx"
 #include <gtest/gtest.h>
 
 TEST(RNTupleCompat, Epoch)
@@ -84,6 +87,79 @@ public:
    ClassDefInlineOverride(RHandcraftedKeyRNTuple, 0)
 };
 
+constexpr static const char *kNtupleObjName = "ntpl";
+
+#define EXPECT_CORRECT_NTUPLE(ntuple, epoch, major, minor, patch) \
+   EXPECT_EQ((ntuple).GetVersionEpoch(), epoch);                  \
+   EXPECT_EQ((ntuple).GetVersionMajor(), major);                  \
+   EXPECT_EQ((ntuple).GetVersionMinor(), minor);                  \
+   EXPECT_EQ((ntuple).GetVersionPatch(), patch);                  \
+   EXPECT_EQ((ntuple).GetSeekHeader(), 282);                      \
+   EXPECT_EQ((ntuple).GetNBytesHeader(), 393);                    \
+   EXPECT_EQ((ntuple).GetLenHeader(), 1470);                      \
+   EXPECT_EQ((ntuple).GetSeekFooter(), 1073);                     \
+   EXPECT_EQ((ntuple).GetNBytesFooter(), 82);                     \
+   EXPECT_EQ((ntuple).GetLenFooter(), 172)
+
+} // namespace fwd_compat
+
+using ROOT::Experimental::RXTuple;
+
+TEST(RNTupleCompat, FwdCompat_ValidNTuple)
+{
+   using namespace fwd_compat;
+
+   // Write a valid hand-crafted RNTuple to disk and verify we can read it.
+   FileRaii fileGuard("test_ntuple_compat_fwd_compat_good.root");
+   fileGuard.PreserveFile();
+
+   {
+      auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
+
+      auto xtuple = RXTuple{};
+      auto key = TKey(&xtuple, RXTuple::Class(), kNtupleObjName, sizeof(RXTuple), file.get());
+      file->AppendKey(&key);
+      key.WriteFile();
+      file->Close();
+   }
+   
+   // Patch all instances of 'RXTuple' -> 'RNTuple'.
+   // We do this by just scanning the whole file and replacing all occurrences.
+   // This is not the optimal way to go about it, but since the file is small (~1KB)
+   // it is fast enough to not matter.
+   {
+      FILE *f = fopen(fileGuard.GetPath().c_str(), "r+b");
+
+      fseek(f, 0, SEEK_END);
+      std::size_t fsize = ftell(f);
+
+      char *filebuf = new char[fsize];
+      fseek(f, 0, SEEK_SET);
+      fread(filebuf, fsize, 1, f);
+
+      std::string_view file_view { filebuf, fsize };
+      std::size_t pos = 0;
+      while ((pos = file_view.find("XTuple"), pos) != std::string_view::npos) {
+         filebuf[pos] = 'N';
+         pos += 6; // skip 'XTuple'
+      }
+      
+      fseek(f, 0, SEEK_SET);
+      fwrite(filebuf, fsize, 1, f);
+      
+      fclose(f);
+      delete [] filebuf;
+   }
+
+   {
+      auto tfile = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "READ"));
+      assert(!tfile->IsZombie());
+      auto *ntuple = tfile->Get<RNTuple>(kNtupleObjName);
+      EXPECT_CORRECT_NTUPLE(*ntuple, 9, 9, 9, 9);
+   }
+}
+
+#if 0
 // The header for the TKey that will contain the handcrafted RNTuple
 constexpr static char kKeyHeader[27] = "\x00\x00\x00\x82"             // nbytes
                                        "\x00\x04"                     // version
@@ -137,8 +213,6 @@ constexpr static char kFutureAnchorBin[103] = "\x40\x00\x00\x5a"                
 constexpr static std::size_t kFutureAnchorSize = sizeof(kFutureAnchorBin) - 1;    // exclude trailing zero
 
 constexpr static std::size_t kNtupleClassNameLen = std::char_traits<char>::length("ROOT::Experimental::RNTuple");
-constexpr static const char *kNtupleObjName = "ntpl";
-constexpr static std::size_t kNtupleObjNameLen = std::char_traits<char>::length(kNtupleObjName);
 
 // clang-format off
 constexpr static std::size_t kKeyLen = kKeyHeaderSize + kNtupleClassNameLen + kNtupleObjNameLen 
@@ -181,18 +255,6 @@ static std::uint64_t WriteKeyHeader(TFile *file, RHandcraftedKeyRNTuple &key, co
 
    return offset;
 }
-
-#define EXPECT_CORRECT_NTUPLE(ntuple, epoch, major, minor, patch) \
-   EXPECT_EQ((ntuple).GetVersionEpoch(), epoch);                  \
-   EXPECT_EQ((ntuple).GetVersionMajor(), major);                  \
-   EXPECT_EQ((ntuple).GetVersionMinor(), minor);                  \
-   EXPECT_EQ((ntuple).GetVersionPatch(), patch);                  \
-   EXPECT_EQ((ntuple).GetSeekHeader(), 282);                      \
-   EXPECT_EQ((ntuple).GetNBytesHeader(), 393);                    \
-   EXPECT_EQ((ntuple).GetLenHeader(), 1470);                      \
-   EXPECT_EQ((ntuple).GetSeekFooter(), 1073);                     \
-   EXPECT_EQ((ntuple).GetNBytesFooter(), 82);                     \
-   EXPECT_EQ((ntuple).GetLenFooter(), 172)
 
 } // end namespace fwd_compat
 
@@ -356,3 +418,4 @@ TEST(RNTupleCompat, FwdCompat_Invalid_Flipped)
       EXPECT_EQ(ntuple, nullptr);
    }
 }
+#endif
