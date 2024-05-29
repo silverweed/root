@@ -146,35 +146,6 @@ public:
    }
 };
 
-constexpr std::int32_t ChecksumRNTupleClass()
-{
-   const char ident[] = "ROOT::Experimental::RNTuple"
-                        "fVersionEpoch"
-                        "unsigned short"
-                        "fVersionMajor"
-                        "unsigned short"
-                        "fVersionMinor"
-                        "unsigned short"
-                        "fVersionPatch"
-                        "unsigned short"
-                        "fSeekHeader"
-                        "unsigned long"
-                        "fNBytesHeader"
-                        "unsigned long"
-                        "fLenHeader"
-                        "unsigned long"
-                        "fSeekFooter"
-                        "unsigned long"
-                        "fNBytesFooter"
-                        "unsigned long"
-                        "fLenFooter"
-                        "unsigned long";
-   std::int32_t id = 0;
-   for (unsigned i = 0; i < (sizeof(ident) - 1); i++)
-      id = static_cast<std::int32_t>(static_cast<std::int64_t>(id) * 3 + ident[i]);
-   return id;
-}
-
 #pragma pack(push, 1)
 /// A name (type, identifies, ...) in the TFile binary format
 struct RTFString {
@@ -812,7 +783,6 @@ struct RTFStreamerInfoObject {
                   'n', 't', 'a', 'l', ':', ':', 'R', 'N', 'T', 'u', 'p', 'l', 'e'};
    char fLTitle = 0;
 
-   RInt32BE fChecksum{ChecksumRNTupleClass()};
    RUInt32BE fVersionRNTuple{5};
 
    RUInt32BE fByteCountObjArr{0x40000000 |
@@ -1107,7 +1077,6 @@ ROOT::Experimental::Internal::RMiniFileReader::GetNTupleProper(std::string_view 
       return R__FAIL("no RNTuple named '" + std::string(ntupleName) + "' in file '" + fRawFile->GetUrl() + "'");
    }
 
-   ReadBuffer(&key, sizeof(key), key.GetSeekKey());
    offset = key.GetSeekKey() + key.fKeyLen;
 
    if (key.fObjLen < sizeof(RTFNTuple)) {
