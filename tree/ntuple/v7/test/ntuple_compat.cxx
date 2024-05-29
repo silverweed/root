@@ -66,11 +66,12 @@ namespace fwd_compat {
 class RHandcraftedKeyRNTuple : public TKey {
 public:
    RHandcraftedKeyRNTuple() = default;
-   
-   RHandcraftedKeyRNTuple(TFile *file, std::size_t keyLen) : TKey(file)
+
+   RHandcraftedKeyRNTuple(TFile *file, std::size_t keyLen, std::size_t objLen) : TKey(file)
    {
       fClassName = RNTuple::Class_Name();
       fKeylen = keyLen;
+      fObjlen = objLen;
    }
 
    /// Register a new key for a data record of size nbytes
@@ -84,42 +85,42 @@ public:
 };
 
 // The header for the TKey that will contain the handcrafted RNTuple
-constexpr static char kKeyHeader[27] = "\x00\x00\x00\x82"                         // nbytes
-                                       "\x00\x04"                                 // version
-                                       "\x00\x00\x00\x46"                         // objlen
-                                       "\x75\x6D\x03\x61"                         // datetime
-                                       "\x00\x3c"                                 // keylen
-                                       "\x00\x01"                                 // cycle
-                                       "\x00\x00\x01\x12"                         // seek key
-                                       "\x00\x00\x00\x64";                        // seek Pdir
+constexpr static char kKeyHeader[27] = "\x00\x00\x00\x82"             // nbytes
+                                       "\x00\x04"                     // version
+                                       "\x00\x00\x00\x46"             // objlen
+                                       "\x75\x6D\x03\x61"             // datetime
+                                       "\x00\x3c"                     // keylen
+                                       "\x00\x01"                     // cycle
+                                       "\x00\x00\x01\x12"             // seek key
+                                       "\x00\x00\x00\x64";            // seek Pdir
 constexpr static std::size_t kKeyHeaderSize = sizeof(kKeyHeader) - 1; // exclude trailing zero
 
 // The header for the TKey that will contain the handcrafted RNTuple from the future
-constexpr static char kFutureKeyHeader[27] = "\x00\x00\x00\xA2"                   // nbytes
-                                             "\x00\x04"                           // version
-                                             "\x00\x00\x00\x66"                   // objlen
-                                             "\x75\x6D\x03\x61"                   // datetime
-                                             "\x00\x3c"                           // keylen
-                                             "\x00\x01"                           // cycle
-                                             "\x00\x00\x01\x12"                   // seek key
-                                             "\x00\x00\x00\x64";                  // seek Pdir
+constexpr static char kFutureKeyHeader[27] = "\x00\x00\x00\xA2"  // nbytes
+                                             "\x00\x04"          // version
+                                             "\x00\x00\x00\x66"  // objlen
+                                             "\x75\x6D\x03\x61"  // datetime
+                                             "\x00\x3c"          // keylen
+                                             "\x00\x01"          // cycle
+                                             "\x00\x00\x01\x12"  // seek key
+                                             "\x00\x00\x00\x64"; // seek Pdir
 static_assert(sizeof(kKeyHeader) == sizeof(kFutureKeyHeader));
 
 // A valid RNTuple anchor on-disk representation (anchor version 0.2.0.0, version class 5)
-constexpr static char kAnchorBin[71] = "\x00\x00\x00\x3a"                         // byte count
-                                       "\x00\x05"                                 // version class
-                                       "\x00\x00\x00\x02\x00\x00\x00\x00"         // version epoch|major|minor|patch
-                                       "\x00\x00\x00\x00\x00\x00\x01\x1A"         // seek header
-                                       "\x00\x00\x00\x00\x00\x00\x01\x89"         // nbytes header
-                                       "\x00\x00\x00\x00\x00\x00\x05\xBE"         // len header
-                                       "\x00\x00\x00\x00\x00\x00\x04\x31"         // seek footer
-                                       "\x00\x00\x00\x00\x00\x00\x00\x52"         // nbytes footer
-                                       "\x00\x00\x00\x00\x00\x00\x00\xAC"         // len footer
-                                       "\x5B\x84\x10\x4B\x0F\xA4\x3D\x32";        // checksum
-constexpr static std::size_t kAnchorSize = sizeof(kAnchorBin) - 1; // exclude trailing zero
+constexpr static char kAnchorBin[71] = "\x40\x00\x00\x3a"                  // byte count
+                                       "\x00\x05"                          // version class
+                                       "\x00\x00\x00\x02\x00\x00\x00\x00"  // version epoch|major|minor|patch
+                                       "\x00\x00\x00\x00\x00\x00\x01\x1A"  // seek header
+                                       "\x00\x00\x00\x00\x00\x00\x01\x89"  // nbytes header
+                                       "\x00\x00\x00\x00\x00\x00\x05\xBE"  // len header
+                                       "\x00\x00\x00\x00\x00\x00\x04\x31"  // seek footer
+                                       "\x00\x00\x00\x00\x00\x00\x00\x52"  // nbytes footer
+                                       "\x00\x00\x00\x00\x00\x00\x00\xAC"  // len footer
+                                       "\x5B\x84\x10\x4B\x0F\xA4\x3D\x32"; // checksum
+constexpr static std::size_t kAnchorSize = sizeof(kAnchorBin) - 1;         // exclude trailing zero
 
 // A valid RNTuple from the future (v 9.9.9.9)
-constexpr static char kFutureAnchorBin[103] = "\x00\x00\x00\x5a"                  // byte count
+constexpr static char kFutureAnchorBin[103] = "\x40\x00\x00\x5a"                  // byte count
                                               "\x03\xE7"                          // version class (v 999)
                                               "\x00\x09\x00\x09\x00\x09\x00\x09"  // version epoch|major|minor|patch
                                               "\x00\x00\x00\x00\x00\x00\x01\x1A"  // seek header
@@ -133,7 +134,7 @@ constexpr static char kFutureAnchorBin[103] = "\x00\x00\x00\x5a"                
                                               "\xDE\xAD\xC0\xDE\xDE\xAD\xC0\xDE"  // hypotethical future field 2
                                               "\xDE\xAD\xC0\xDE\xDE\xAD\xC0\xDE"  // hypotethical future field 3
                                               "\x9B\xD3\x59\xBD\x40\x29\x50\x0D"; // checksum
-constexpr static std::size_t kFutureAnchorSize = sizeof(kFutureAnchorBin) - 1; // exclude trailing zero
+constexpr static std::size_t kFutureAnchorSize = sizeof(kFutureAnchorBin) - 1;    // exclude trailing zero
 
 constexpr static std::size_t kNtupleClassNameLen = std::char_traits<char>::length("ROOT::Experimental::RNTuple");
 constexpr static const char *kNtupleObjName = "ntpl";
@@ -181,6 +182,18 @@ static std::uint64_t WriteKeyHeader(TFile *file, RHandcraftedKeyRNTuple &key, co
    return offset;
 }
 
+#define EXPECT_CORRECT_NTUPLE(ntuple, epoch, major, minor, patch) \
+   EXPECT_EQ((ntuple).GetVersionEpoch(), epoch);                  \
+   EXPECT_EQ((ntuple).GetVersionMajor(), major);                  \
+   EXPECT_EQ((ntuple).GetVersionMinor(), minor);                  \
+   EXPECT_EQ((ntuple).GetVersionPatch(), patch);                  \
+   EXPECT_EQ((ntuple).GetSeekHeader(), 282);                      \
+   EXPECT_EQ((ntuple).GetNBytesHeader(), 393);                    \
+   EXPECT_EQ((ntuple).GetLenHeader(), 1470);                      \
+   EXPECT_EQ((ntuple).GetSeekFooter(), 1073);                     \
+   EXPECT_EQ((ntuple).GetNBytesFooter(), 82);                     \
+   EXPECT_EQ((ntuple).GetLenFooter(), 172)
+
 } // end namespace fwd_compat
 
 TEST(RNTupleCompat, FwdCompat_ValidNTuple)
@@ -189,29 +202,30 @@ TEST(RNTupleCompat, FwdCompat_ValidNTuple)
 
    // Write a valid hand-crafted RNTuple to disk and verify we can read it.
    FileRaii fileGuard("test_ntuple_compat_fwd_compat_good.root");
+   fileGuard.PreserveFile();
 
    auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
 
-   RHandcraftedKeyRNTuple key{file.get(), kKeyLen};
+   RHandcraftedKeyRNTuple key{file.get(), kKeyLen, kAnchorSize};
    auto offset = WriteKeyHeader(file.get(), key);
 
    // Write anchor
    Write(*file, offset, kAnchorBin, kAnchorSize);
    file->Close();
 
-   auto rawFile = RRawFile::Create(fileGuard.GetPath());
-   auto reader = RMiniFileReader{rawFile.get()};
-   auto ntuple = reader.GetNTuple(kNtupleObjName).Unwrap();
-   EXPECT_EQ(ntuple.GetVersionEpoch(), 0);
-   EXPECT_EQ(ntuple.GetVersionMajor(), 2);
-   EXPECT_EQ(ntuple.GetVersionMinor(), 0);
-   EXPECT_EQ(ntuple.GetVersionPatch(), 0);
-   EXPECT_EQ(ntuple.GetSeekHeader(), 282);
-   EXPECT_EQ(ntuple.GetNBytesHeader(), 393);
-   EXPECT_EQ(ntuple.GetLenHeader(), 1470);
-   EXPECT_EQ(ntuple.GetSeekFooter(), 1073);
-   EXPECT_EQ(ntuple.GetNBytesFooter(), 82);
-   EXPECT_EQ(ntuple.GetLenFooter(), 172);
+   {
+      auto rawFile = RRawFile::Create(fileGuard.GetPath());
+      auto reader = RMiniFileReader{rawFile.get()};
+      auto ntuple = reader.GetNTuple(kNtupleObjName).Unwrap();
+      EXPECT_CORRECT_NTUPLE(ntuple, 0, 2, 0, 0);
+   }
+
+   {
+      auto tfile = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "READ"));
+      assert(!tfile->IsZombie());
+      auto *ntuple = tfile->Get<RNTuple>(kNtupleObjName);
+      EXPECT_CORRECT_NTUPLE(*ntuple, 0, 2, 0, 0);
+   }
 }
 
 TEST(RNTupleCompat, FwdCompat_ValidNTuple_Future)
@@ -224,26 +238,25 @@ TEST(RNTupleCompat, FwdCompat_ValidNTuple_Future)
 
    auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
 
-   RHandcraftedKeyRNTuple key{file.get(), kKeyLen};
+   RHandcraftedKeyRNTuple key{file.get(), kKeyLen, kFutureAnchorSize};
    auto offset = WriteKeyHeader(file.get(), key, kFutureKeyHeader, kFutureAnchorSize);
 
    // Write anchor
    Write(*file, offset, kFutureAnchorBin, kFutureAnchorSize);
    file->Close();
 
-   auto rawFile = RRawFile::Create(fileGuard.GetPath());
-   auto reader = RMiniFileReader{rawFile.get()};
-   auto ntuple = reader.GetNTuple(kNtupleObjName).Unwrap();
-   EXPECT_EQ(ntuple.GetVersionEpoch(), 9);
-   EXPECT_EQ(ntuple.GetVersionMajor(), 9);
-   EXPECT_EQ(ntuple.GetVersionMinor(), 9);
-   EXPECT_EQ(ntuple.GetVersionPatch(), 9);
-   EXPECT_EQ(ntuple.GetSeekHeader(), 282);
-   EXPECT_EQ(ntuple.GetNBytesHeader(), 393);
-   EXPECT_EQ(ntuple.GetLenHeader(), 1470);
-   EXPECT_EQ(ntuple.GetSeekFooter(), 1073);
-   EXPECT_EQ(ntuple.GetNBytesFooter(), 82);
-   EXPECT_EQ(ntuple.GetLenFooter(), 172);
+   {
+      auto rawFile = RRawFile::Create(fileGuard.GetPath());
+      auto reader = RMiniFileReader{rawFile.get()};
+      auto ntuple = reader.GetNTuple(kNtupleObjName).Unwrap();
+      EXPECT_CORRECT_NTUPLE(ntuple, 9, 9, 9, 9);
+   }
+
+   {
+      auto tfile = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "READ"));
+      auto *ntuple = tfile->Get<RNTuple>(kNtupleObjName);
+      EXPECT_CORRECT_NTUPLE(*ntuple, 9, 9, 9, 9);
+   }
 }
 
 TEST(RNTupleCompat, FwdCompat_Invalid_Chopped)
@@ -257,17 +270,25 @@ TEST(RNTupleCompat, FwdCompat_Invalid_Chopped)
 
    auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
 
-   RHandcraftedKeyRNTuple key{file.get(), kKeyLen};
+   RHandcraftedKeyRNTuple key{file.get(), kKeyLen, kAnchorSize};
    auto offset = WriteKeyHeader(file.get(), key);
 
    // Write anchor
    Write(*file, offset, kAnchorBin, kCorruptedAnchorSize);
    file->Close();
 
-   auto rawFile = RRawFile::Create(fileGuard.GetPath());
-   auto reader = RMiniFileReader{rawFile.get()};
-   auto ntuple = reader.GetNTuple("ntpl");
-   EXPECT_FALSE(static_cast<bool>(ntuple));
+   {
+      auto rawFile = RRawFile::Create(fileGuard.GetPath());
+      auto reader = RMiniFileReader{rawFile.get()};
+      auto ntuple = reader.GetNTuple(kNtupleObjName);
+      EXPECT_FALSE(static_cast<bool>(ntuple));
+   }
+
+   {
+      auto tfile = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "READ"));
+      auto *ntuple = tfile->Get<RNTuple>(kNtupleObjName);
+      EXPECT_EQ(ntuple, nullptr);
+   }
 }
 
 TEST(RNTupleCompat, FwdCompat_Invalid_ChoppedOne)
@@ -281,17 +302,25 @@ TEST(RNTupleCompat, FwdCompat_Invalid_ChoppedOne)
 
    auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
 
-   RHandcraftedKeyRNTuple key{file.get(), kKeyLen};
+   RHandcraftedKeyRNTuple key{file.get(), kKeyLen, kAnchorSize};
    auto offset = WriteKeyHeader(file.get(), key);
 
    // Write anchor
    Write(*file, offset, kAnchorBin, kCorruptedAnchorSize);
    file->Close();
 
-   auto rawFile = RRawFile::Create(fileGuard.GetPath());
-   auto reader = RMiniFileReader{rawFile.get()};
-   auto ntuple = reader.GetNTuple("ntpl");
-   EXPECT_FALSE(static_cast<bool>(ntuple));
+   {
+      auto rawFile = RRawFile::Create(fileGuard.GetPath());
+      auto reader = RMiniFileReader{rawFile.get()};
+      auto ntuple = reader.GetNTuple(kNtupleObjName);
+      EXPECT_FALSE(static_cast<bool>(ntuple));
+   }
+
+   {
+      auto tfile = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "READ"));
+      auto *ntuple = tfile->Get<RNTuple>(kNtupleObjName);
+      EXPECT_EQ(ntuple, nullptr);
+   }
 }
 
 TEST(RNTupleCompat, FwdCompat_Invalid_Flipped)
@@ -301,23 +330,29 @@ TEST(RNTupleCompat, FwdCompat_Invalid_Flipped)
    // simulate a corrupted anchor by flipping a random bit from the otherwise-valid anchor.
    char corruptedAnchor[sizeof(kAnchorBin)];
    memcpy(corruptedAnchor, kAnchorBin, sizeof(kAnchorBin));
-
-   char &ch = corruptedAnchor[kAnchorSize / 2];
-   ch ^= (1u << 3);
+   corruptedAnchor[kAnchorSize / 2] ^= (1u << 3);
 
    FileRaii fileGuard("test_ntuple_compat_fwd_compat_flip.root");
 
    auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
 
-   RHandcraftedKeyRNTuple key{file.get(), kKeyLen};
+   RHandcraftedKeyRNTuple key{file.get(), kKeyLen, kAnchorSize};
    auto offset = WriteKeyHeader(file.get(), key);
 
    // Write anchor
    Write(*file, offset, corruptedAnchor, kAnchorSize);
    file->Close();
 
-   auto rawFile = RRawFile::Create(fileGuard.GetPath());
-   auto reader = RMiniFileReader{rawFile.get()};
-   auto ntuple = reader.GetNTuple("ntpl");
-   EXPECT_FALSE(static_cast<bool>(ntuple));
+   {
+      auto rawFile = RRawFile::Create(fileGuard.GetPath());
+      auto reader = RMiniFileReader{rawFile.get()};
+      auto ntuple = reader.GetNTuple(kNtupleObjName);
+      EXPECT_FALSE(static_cast<bool>(ntuple));
+   }
+
+   {
+      auto tfile = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "READ"));
+      auto *ntuple = tfile->Get<RNTuple>(kNtupleObjName);
+      EXPECT_EQ(ntuple, nullptr);
+   }
 }
