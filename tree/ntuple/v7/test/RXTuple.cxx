@@ -12,7 +12,7 @@ void ROOT::Experimental::RXTuple::Streamer(TBuffer &buf)
    if (buf.IsReading()) {
       // Skip byte count and class version
       auto offCkData = sizeof(UInt_t) + sizeof(Version_t);
-      auto expectedChecksum = XXH3_64bits(buf.Buffer() + offCkData, sizeof(RXTuple));
+      auto expectedChecksum = XXH3_64bits(buf.GetCurrent() + offCkData, sizeof(RXTuple));
 
       std::uint64_t onDiskChecksum;
       buf.ReadClassBuffer(RXTuple::Class(), this);
@@ -25,7 +25,7 @@ void ROOT::Experimental::RXTuple::Streamer(TBuffer &buf)
    } else {
       auto offCkData = buf.Length() + sizeof(UInt_t) + sizeof(Version_t);
       buf.WriteClassBuffer(RXTuple::Class(), this);
-      std::uint64_t checksum = XXH3_64bits(buf.Buffer() + offCkData, buf.Length() - offCkData);
-      buf << checksum;
+      std::uint64_t checksum = XXH3_64bits(buf.Buffer() + offCkData, sizeof(RXTuple));
+      buf << checksum; 
    }
 }

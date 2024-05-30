@@ -118,7 +118,6 @@ TEST(RNTupleCompat, FwdCompat_ValidNTuple)
 
       auto xtuple = RXTuple{};
       auto key = TKey(&xtuple, RXTuple::Class(), kNtupleObjName, sizeof(RXTuple), file.get());
-      file->AppendKey(&key);
       key.WriteFile();
       file->Close();
    }
@@ -156,6 +155,14 @@ TEST(RNTupleCompat, FwdCompat_ValidNTuple)
       assert(!tfile->IsZombie());
       auto *ntuple = tfile->Get<RNTuple>(kNtupleObjName);
       EXPECT_CORRECT_NTUPLE(*ntuple, 9, 9, 9, 9);
+   }
+
+   if (false)
+   {
+      auto tfile = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "READ"));
+      assert(!tfile->IsZombie());
+      auto *xtuple = tfile->Get<RXTuple>(kNtupleObjName);
+      EXPECT_EQ(xtuple->fVersionEpoch, 9);
    }
 }
 
