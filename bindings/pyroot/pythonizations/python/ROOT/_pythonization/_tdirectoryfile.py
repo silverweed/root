@@ -72,6 +72,7 @@ def _TDirectoryFile_Get(self, namecycle):
     """
 
     import cppyy
+    import ROOT
 
     key = self.GetKey(namecycle)
     if key:
@@ -79,7 +80,9 @@ def _TDirectoryFile_Get(self, namecycle):
         address = self.GetObjectChecked(namecycle, class_name)
         return cppyy.bind_object(address, class_name)
     # no key? for better or worse, call normal Get()
-    return self._Get(namecycle)
+    out = self._Get(namecycle)
+    ROOT.SetOwnership(out, True)
+    return out
 
 
 # Pythonizor function
