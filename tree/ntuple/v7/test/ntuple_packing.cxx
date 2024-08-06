@@ -5,6 +5,7 @@
 #include <cstring> // for memcmp
 #include <limits>
 #include <type_traits>
+#include "ROOT/RColumnElement.hxx"
 #include <utility>
 
 template <typename PodT, typename NarrowT, EColumnType ColumnT>
@@ -504,3 +505,4 @@ TEST(Packing, Real32Trunc)
       }
    }
 }
+
