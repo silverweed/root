@@ -28,6 +28,7 @@
 #include <cstring> // for memcpy
 #include <cstddef> // for std::byte
 #include <cstdint>
+#include <cassert>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -308,6 +309,11 @@ public:
    virtual void SetBitsOnStorage(std::size_t)
    {
       throw RException(R__FAIL(std::string("internal error: cannot change bit width of this column type")));
+   }
+
+   virtual void SetValueRange(double, double)
+   {
+      throw RException(R__FAIL(std::string("internal error: cannot set value range of this column type")));
    }
 
    /// If the on-storage layout and the in-memory layout differ, packing creates an on-disk page from an in-memory page
@@ -762,6 +768,132 @@ public:
    }
 };
 
+namespace Quantize {
+
+using Quantized_t = std::uint32_t;
+
+[[maybe_unused]] inline std::size_t LeadingZeroes(std::uint32_t x)
+{
+#ifdef _MSC_VER
+   unsigned long idx = 0;
+   _BitScanForward(&idx, x);
+   return static_cast<std::size_t>(idx);
+#else
+   return static_cast<std::size_t>(__builtin_clzl(x));
+#endif
+}
+
+[[maybe_unused]] inline std::size_t TrailingZeroes(std::uint32_t x)
+{
+#ifdef _MSC_VER
+   unsigned long idx = 0;
+   _BitScanReverse(&idx, x);
+   return static_cast<std::size_t>(idx);
+#else
+   return static_cast<std::size_t>(__builtin_ctzl(x));
+#endif
+}
+
+/// Converts the array of `count` floating point numbers in `src` into an array of their quantized representations.
+/// Each element of `src` is assumed to be in the inclusive range [min, max].
+/// The quantized representation will consist of unsigned integers of at most `nQuantBits`, with `8 <= nQuantBits <=
+/// 32`. The unused bits are kepts in the LSB of the quantized integers, to allow for easy bit packing of those integers
+/// via BitPacking::PackBits().
+template <typename T>
+void QuantizeReals(Quantized_t *dst, const T *src, std::size_t count, double min, double max, std::size_t nQuantBits)
+{
+   static_assert(std::is_floating_point_v<T>);
+   static_assert(sizeof(T) <= sizeof(double));
+   R__ASSERT(nQuantBits >= 8 && nQuantBits <= 8 * sizeof(Quantized_t));
+
+   const std::size_t quantMax = (1ull << nQuantBits) - 1;
+   const double scale = quantMax / (max - min);
+   const std::size_t unusedBits = sizeof(Quantized_t) * 8 - nQuantBits;
+
+   for (std::size_t i = 0; i < count; ++i) {
+      T elem = src[i];
+      assert(min <= elem && elem <= max);
+      double e = (elem - min) * scale;
+      Quantized_t q = static_cast<Quantized_t>(e);
+      ByteSwapIfNecessary(q);
+
+      // double-check we actually used at most `nQuantBits`
+      assert(LeadingZeroes(q) >= unusedBits);
+
+      // we want to leave zeroes in the LSB, not the MSB, because we'll then drop the LSB
+      // when bit packing.
+      dst[i] = q << unusedBits;
+   }
+}
+
+/// Undoes the transformation performed by QuantizeReals() (assuming the same `count`, `min`, `max` and `nQuantBits`).
+template <typename T>
+void UnquantizeReals(T *dst, const Quantized_t *src, std::size_t count, double min, double max, std::size_t nQuantBits)
+{
+   static_assert(std::is_floating_point_v<T>);
+   static_assert(sizeof(T) <= sizeof(double));
+   R__ASSERT(nQuantBits >= 8 && nQuantBits <= 8 * sizeof(Quantized_t));
+
+   const std::size_t quantMax = (1ull << nQuantBits) - 1;
+   const double scale = (max - min) / quantMax;
+   const double bias = min * quantMax / (max - min);
+   const std::size_t unusedBits = sizeof(Quantized_t) * 8 - nQuantBits;
+
+   for (std::size_t i = 0; i < count; ++i) {
+      Quantized_t elem = src[i];
+      // Undo the LSB-preserving shift performed by QuantizeReals
+      assert(TrailingZeroes(elem) >= unusedBits);
+      elem >>= unusedBits;
+      ByteSwapIfNecessary(elem);
+
+      double fq = static_cast<double>(elem);
+      double e = (fq + bias) * scale;
+      dst[i] = static_cast<T>(e);
+      assert(min <= dst[i] && dst[i] <= max);
+   }
+}
+} // namespace Quantize
+
+template <>
+class RColumnElement<float, EColumnType::kReal32Quant> : public RColumnElementBase {
+   double fMin = std::numeric_limits<double>::min();
+   double fMax = std::numeric_limits<double>::max();
+
+public:
+   static constexpr bool kIsMappable = false;
+   static constexpr std::size_t kSize = sizeof(float);
+
+   RColumnElement() : RColumnElementBase(kSize, kReal32QuantBitsMax) {}
+
+   void SetBitsOnStorage(std::size_t bitsOnStorage) final
+   {
+      R__ASSERT(bitsOnStorage >= kReal32QuantBitsMin && bitsOnStorage <= kReal32QuantBitsMax);
+      fBitsOnStorage = bitsOnStorage;
+   }
+
+   void SetValueRange(double min, double max) final
+   {
+      fMin = min;
+      fMax = max;
+   }
+
+   bool IsMappable() const final { return kIsMappable; }
+
+   void Pack(void *dst, void *src, std::size_t count) const final
+   {
+      auto quantized = std::make_unique<Quantize::Quantized_t[]>(count);
+      Quantize::QuantizeReals(quantized.get(), reinterpret_cast<const float *>(src), count, fMin, fMax, fBitsOnStorage);
+      BitPacking::PackBits(dst, quantized.get(), count, sizeof(Quantize::Quantized_t), fBitsOnStorage);
+   }
+
+   void Unpack(void *dst, void *src, std::size_t count) const final
+   {
+      auto quantized = std::make_unique<Quantize::Quantized_t[]>(count);
+      BitPacking::UnpackBits(quantized.get(), src, count, sizeof(Quantize::Quantized_t), fBitsOnStorage);
+      Quantize::UnquantizeReals(reinterpret_cast<float *>(dst), quantized.get(), count, fMin, fMax, fBitsOnStorage);
+   }
+};
+
 #define __RCOLUMNELEMENT_SPEC_BODY(CppT, BaseT, BitsOnStorage)  \
    static constexpr std::size_t kSize = sizeof(CppT);           \
    static constexpr std::size_t kBitsOnStorage = BitsOnStorage; \
@@ -900,6 +1032,7 @@ std::unique_ptr<RColumnElementBase> RColumnElementBase::Generate(EColumnType typ
    case EColumnType::kSplitInt16: return std::make_unique<RColumnElement<CppT, EColumnType::kSplitInt16>>();
    case EColumnType::kSplitUInt16: return std::make_unique<RColumnElement<CppT, EColumnType::kSplitUInt16>>();
    case EColumnType::kReal32Trunc: return std::make_unique<RColumnElement<CppT, EColumnType::kReal32Trunc>>();
+   case EColumnType::kReal32Quant: return std::make_unique<RColumnElement<CppT, EColumnType::kReal32Quant>>();
    default: R__ASSERT(false);
    }
    // never here

@@ -34,6 +34,10 @@ inline constexpr auto kReal32TruncBitsMin = 10;
 inline constexpr auto kReal32TruncBitsMax = 31;
 inline constexpr auto kReal32TruncBitsRangeLen = kReal32TruncBitsMax - kReal32TruncBitsMin;
 
+inline constexpr auto kReal32QuantBitsMin = 8;
+inline constexpr auto kReal32QuantBitsMax = 32;
+inline constexpr auto kReal32QuantBitsRangeLen = kReal32QuantBitsMax - kReal32QuantBitsMin;
+
 // clang-format off
 /**
 \class ROOT::Experimental::EColumnType
@@ -83,6 +87,7 @@ enum class EColumnType {
    kSplitInt16,
    kSplitUInt16,
    kReal32Trunc,
+   kReal32Quant,
    kMax,
 };
 

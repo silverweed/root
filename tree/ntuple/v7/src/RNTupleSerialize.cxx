@@ -65,6 +65,8 @@ std::uint32_t SerializeField(const ROOT::Experimental::RFieldDescriptor &fieldDe
       flags |= RNTupleSerializer::kFlagProjectedField;
    if (fieldDesc.GetTypeChecksum().has_value())
       flags |= RNTupleSerializer::kFlagHasTypeChecksum;
+   if (fieldDesc.GetValueRange().has_value())
+      flags |= RNTupleSerializer::kFlagHasValueRange;
    pos += RNTupleSerializer::SerializeUInt16(flags, *where);
 
    if (flags & RNTupleSerializer::kFlagRepetitiveField) {
@@ -75,6 +77,15 @@ std::uint32_t SerializeField(const ROOT::Experimental::RFieldDescriptor &fieldDe
    }
    if (flags & RNTupleSerializer::kFlagHasTypeChecksum) {
       pos += RNTupleSerializer::SerializeUInt32(fieldDesc.GetTypeChecksum().value(), *where);
+   }
+   if (flags & RNTupleSerializer::kFlagHasValueRange) {
+      auto [min, max] = *fieldDesc.GetValueRange();
+      std::uint64_t intMin, intMax;
+      static_assert(sizeof(min) == sizeof(intMin) && sizeof(max) == sizeof(intMax));
+      memcpy(&intMin, &min, sizeof(min));
+      memcpy(&intMax, &max, sizeof(max));
+      pos += RNTupleSerializer::SerializeUInt64(intMin, *where);
+      pos += RNTupleSerializer::SerializeUInt64(intMax, *where);
    }
 
    pos += RNTupleSerializer::SerializeString(fieldDesc.GetFieldName(), *where);

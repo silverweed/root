@@ -97,6 +97,7 @@ ROOT::Experimental::Internal::RColumnElementBase::GetValidBitRange(EColumnType t
    case EColumnType::kSplitInt16: return std::make_pair(16, 16);
    case EColumnType::kSplitUInt16: return std::make_pair(16, 16);
    case EColumnType::kReal32Trunc: return std::make_pair(kReal32TruncBitsMin, kReal32TruncBitsMax);
+   case EColumnType::kReal32Quant: return std::make_pair(kReal32QuantBitsMin, kReal32QuantBitsMax);
    default: assert(false);
    }
    // never here
@@ -134,6 +135,7 @@ std::string ROOT::Experimental::Internal::RColumnElementBase::GetTypeName(EColum
    case EColumnType::kSplitInt16: return "SplitInt16";
    case EColumnType::kSplitUInt16: return "SplitUInt16";
    case EColumnType::kReal32Trunc: return "Real32Trunc";
+   case EColumnType::kReal32Quant: return "Real32Quant";
    default: return "UNKNOWN";
    }
 }
@@ -294,3 +296,4 @@ void ROOT::Experimental::Internal::BitPacking::UnpackBits(void *dst, const void 
    assert(prevWordAccum == 0);
    assert(dstIdx == count);
 }
+

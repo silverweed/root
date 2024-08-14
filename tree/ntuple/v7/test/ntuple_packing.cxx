@@ -5,8 +5,10 @@
 #include <cstring> // for memcmp
 #include <limits>
 #include <type_traits>
-#include "ROOT/RColumnElement.hxx"
 #include <utility>
+#include <random>
+
+#include "ROOT/RColumnElement.hxx"
 
 template <typename PodT, typename NarrowT, EColumnType ColumnT>
 struct Helper {
@@ -506,3 +508,132 @@ TEST(Packing, Real32Trunc)
    }
 }
 
+TEST(Packing, RealQuantize)
+{
+   using namespace ROOT::Experimental::Internal::Quantize;
+
+   float fs[5] = {1.f, 2.f, 3.f, 4.f, 5.f};
+   Quantized_t qs[5];
+   QuantizeReals(qs, fs, 5, 1., 5., 16);
+
+   float fuqs[5];
+   UnquantizeReals(fuqs, qs, 5, 1., 5., 16);
+   EXPECT_NEAR(fuqs[0], 1.f, 0.001f);
+   EXPECT_NEAR(fuqs[1], 2.f, 0.001f);
+   EXPECT_NEAR(fuqs[2], 3.f, 0.001f);
+   EXPECT_NEAR(fuqs[3], 4.f, 0.001f);
+   EXPECT_NEAR(fuqs[4], 5.f, 0.001f);
+
+   {
+      std::default_random_engine rng{42};
+      double min = -250, max = 500;
+      std::uniform_real_distribution<decltype(min)> dist{min, max};
+
+      constexpr auto N = 10000;
+      constexpr auto kNbits = 20;
+      auto inputs = std::make_unique<decltype(min)[]>(N);
+      for (int i = 0; i < N; ++i)
+         inputs.get()[i] = dist(rng);
+
+      auto quant = std::make_unique<Quantized_t[]>(N);
+      QuantizeReals(quant.get(), inputs.get(), N, min, max, kNbits);
+
+      auto unquant = std::make_unique<decltype(min)[]>(N);
+      UnquantizeReals(unquant.get(), quant.get(), N, min, max, kNbits);
+
+      for (int i = 0; i < N; ++i)
+         EXPECT_NEAR(inputs.get()[i], unquant.get()[i], 0.001);
+   }
+
+   {
+      std::default_random_engine rng{1337};
+      float min = 0, max = 1;
+      std::uniform_real_distribution<decltype(min)> dist{min, max};
+
+      constexpr auto N = 10000;
+      constexpr auto kNbits = 8;
+      auto inputs = std::make_unique<decltype(min)[]>(N);
+      for (int i = 0; i < N; ++i)
+         inputs.get()[i] = dist(rng);
+
+      auto quant = std::make_unique<Quantized_t[]>(N);
+      QuantizeReals(quant.get(), inputs.get(), N, min, max, kNbits);
+
+      auto unquant = std::make_unique<decltype(min)[]>(N);
+      UnquantizeReals(unquant.get(), quant.get(), N, min, max, kNbits);
+
+      for (int i = 0; i < N; ++i)
+         EXPECT_NEAR(inputs.get()[i], unquant.get()[i], 0.01);
+   }
+}
+
+TEST(Packing, Real32Quant)
+{
+   namespace BitPacking = ROOT::Experimental::Internal::BitPacking;
+   {
+      constexpr auto kBitsOnStorage = 18;
+      RColumnElement<float, EColumnType::kReal32Quant> element;
+      float min = -1, max = 1;
+      element.SetBitsOnStorage(kBitsOnStorage);
+      element.SetValueRange(min, max);
+
+      float elem[5] = {-1, -0.5, 0, 0.5, 1};
+      unsigned char packed[BitPacking::MinBufSize(5, kBitsOnStorage)];
+      element.Pack(packed, elem, 5);
+
+      float unpacked[5];
+      element.Unpack(unpacked, packed, 5);
+      for (int i = 0; i < 5; ++i)
+         EXPECT_NEAR(unpacked[i], elem[i], 0.001f);
+   }
+   {
+      constexpr auto kBitsOnStorage = 18;
+      constexpr auto N = 1000;
+      using T = float;
+      RColumnElement<T, EColumnType::kReal32Quant> element;
+      T min = -1, max = 1;
+      element.SetBitsOnStorage(kBitsOnStorage);
+      element.SetValueRange(min, max);
+
+      std::default_random_engine rng{14};
+      std::uniform_real_distribution<T> dist{min, max};
+
+      T f[N];
+      for (int i = 0; i < N; ++i)
+         f[i] = dist(rng);
+
+      auto out = std::make_unique<unsigned char[]>(element.GetPackedSize(N));
+      element.Pack(out.get(), f, N);
+
+      T unpacked[N];
+      element.Unpack(unpacked, out.get(), N);
+      for (int i = 0; i < N; ++i) {
+         EXPECT_NEAR(unpacked[i], f[i], 0.001f);
+      }
+   }
+   {
+      constexpr auto kBitsOnStorage = 10;
+      constexpr auto N = 1000;
+      using T = double;
+      RColumnElement<T, EColumnType::kReal32Quant> element;
+      T min = -1e10, max = -100;
+      element.SetBitsOnStorage(kBitsOnStorage);
+      element.SetValueRange(min, max);
+
+      std::default_random_engine rng{76};
+      std::uniform_real_distribution<T> dist{min, max};
+
+      T f[N];
+      for (int i = 0; i < N; ++i)
+         f[i] = dist(rng);
+
+      auto out = std::make_unique<unsigned char[]>(element.GetPackedSize(N));
+      element.Pack(out.get(), f, N);
+
+      T unpacked[N];
+      element.Unpack(unpacked, out.get(), N);
+      for (int i = 0; i < N; ++i) {
+         EXPECT_NEAR(unpacked[i], f[i], 0.001f);
+      }
+   }
+}

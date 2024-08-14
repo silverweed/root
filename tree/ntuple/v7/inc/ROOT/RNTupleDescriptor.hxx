@@ -72,6 +72,10 @@ class RFieldDescriptor {
    friend class Internal::RNTupleDescriptorBuilder;
    friend class Internal::RFieldDescriptorBuilder;
 
+   struct RValueRange {
+      double fMin, fMax;
+   };
+
 private:
    DescriptorId_t fFieldId = kInvalidDescriptorId;
    /// The version of the C++-type-to-column translation mechanics
@@ -106,6 +110,8 @@ private:
    /// For custom classes, we store the ROOT TClass reported checksum to facilitate the use of I/O rules that
    /// identify types by their checksum
    std::optional<std::uint32_t> fTypeChecksum;
+   /// Optional value range (used e.g. by quantized real fields)
+   std::optional<RValueRange> fValueRange;
 
 public:
    RFieldDescriptor() = default;
@@ -137,6 +143,7 @@ public:
    std::uint32_t GetColumnCardinality() const { return fColumnCardinality; }
    std::optional<std::uint32_t> GetTypeChecksum() const { return fTypeChecksum; }
    bool IsProjectedField() const { return fProjectionSourceId != kInvalidDescriptorId; }
+   std::optional<RValueRange> GetValueRange() const { return fValueRange; }
 };
 
 // clang-format off
