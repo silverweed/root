@@ -689,32 +689,47 @@ public:
    }
 };
 
-namespace FloatPacking {
+namespace BitPacking {
 
 using Word_t = std::uintmax_t;
 inline constexpr std::size_t kBitsPerWord = sizeof(Word_t) * 8;
 
-/// Returns the minimum safe size (in bytes) of a buffer that is intended to be used as a destination for PackFloats
-/// or a source for UnpackFloats.
+/// Returns the minimum safe size (in bytes) of a buffer that is intended to be used as a destination for PackBits
+/// or a source for UnpackBits.
 /// Passing a buffer that's less than this size will cause invalid memory reads and writes.
-constexpr std::size_t MinBufSize(std::size_t count, std::size_t nFloatBits)
+constexpr std::size_t MinBufSize(std::size_t count, std::size_t nDstBits)
 {
    return (count != 0) * sizeof(Word_t) *
-          std::max<std::size_t>(1, (count * nFloatBits + kBitsPerWord - 1) / kBitsPerWord);
+          std::max<std::size_t>(1, (count * nDstBits + kBitsPerWord - 1) / kBitsPerWord);
 }
 
-/// Tightly packs `count` floats contained in `src` into `dst` using `nFloatBits` per float.
-/// `nFloatBits` must be >= kReal32TruncBitsMin and <= kReal32TruncBitsMax.
-/// The extra bits are dropped from the mantissa. The sign and exponent bits are always preserved.
-/// IMPORTANT: the size of `dst` must be at least `MinBufSize(count, nFloatBits)`
-void PackFloats(void *dst, const float *src, std::size_t count, std::size_t nFloatBits);
+/// Tightly packs `count` items of size `sizeofSrc` contained in `src` into `dst` using `nDstBits` per item.
+/// It must be  `0 < sizeofSrc <= 8`  and  `0 < nDstBits <= sizeofSrc * 8`.
+/// The extra least significant bits are dropped.
+/// IMPORTANT: the size of `dst` must be at least `MinBufSize(count, nBitBits)`
+void PackBits(void *dst, const void *src, std::size_t count, std::size_t sizeofSrc, std::size_t nDstBits);
 
-/// Undoes the effect of `PackFloats`. The bits that were truncated in the packed representation
-/// are filled with zeroes, effectively rounding the original float towards 0.
-/// IMPORTANT: the size of `src` must be at least `MinBufSize(count, nFloatBits)`
-void UnpackFloats(float *dst, const void *src, std::size_t count, std::size_t nFloatBits);
+/// Undoes the effect of `PackBits`. The bits that were truncated in the packed representation
+/// are filled with zeroes.
+/// It must be  `0 < sizeofDst <= 8`  and  `0 < nSrcBits <= sizeofDst * 8`.
+/// IMPORTANT: the size of `src` must be at least `MinBufSize(count, nBitBits)`
+void UnpackBits(void *dst, const void *src, std::size_t count, std::size_t sizeofDst, std::size_t nSrcBits);
 
-}; // namespace FloatPacking
+template <typename T>
+void PackBits(void *dst, const T *src, std::size_t count, std::size_t nDstBits)
+{
+   static_assert(std::is_trivial_v<T>);
+   return PackBits(dst, src, count, sizeof(T), nDstBits);
+}
+
+template <typename T>
+void UnpackBits(T *dst, const void *src, std::size_t count, std::size_t nSrcBits)
+{
+   static_assert(std::is_trivial_v<T>);
+   return UnpackBits(dst, src, count, sizeof(T), nSrcBits);
+}
+
+}; // namespace BitPacking
 
 template <>
 class RColumnElement<float, EColumnType::kReal32Trunc> : public RColumnElementBase {
@@ -734,17 +749,17 @@ public:
 
    std::size_t GetPackedSize(std::size_t nElements = 1U) const final
    {
-      return FloatPacking::MinBufSize(nElements, fBitsOnStorage);
+      return BitPacking::MinBufSize(nElements, fBitsOnStorage);
    }
 
    void Pack(void *dst, void *src, std::size_t count) const final
    {
-      FloatPacking::PackFloats(dst, reinterpret_cast<const float *>(src), count, fBitsOnStorage);
+      BitPacking::PackBits(dst, reinterpret_cast<const float *>(src), count, fBitsOnStorage);
    }
 
    void Unpack(void *dst, void *src, std::size_t count) const final
    {
-      FloatPacking::UnpackFloats(reinterpret_cast<float *>(dst), src, count, fBitsOnStorage);
+      BitPacking::UnpackBits(reinterpret_cast<float *>(dst), src, count, fBitsOnStorage);
    }
 };
 
