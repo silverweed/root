@@ -81,6 +81,15 @@ void CopyBswap(void *destination, const void *source, std::size_t count)
    }
 }
 
+template <std::size_t N>
+void InPlaceBswap(void *array, std::size_t count)
+{
+   auto arr = reinterpret_cast<typename RByteSwap<N>::value_type *>(array);
+   for (std::size_t i = 0; i < count; ++i) {
+      arr[i] = RByteSwap<N>::bswap(arr[i]);
+   }
+}
+
 /// Casts T to one of the ints used in RByteSwap and back to its original type, which may be float or double
 #if R__LITTLE_ENDIAN == 0
 template <typename T>
@@ -315,7 +324,7 @@ public:
 
    std::size_t GetSize() const { return fSize; }
    std::size_t GetBitsOnStorage() const { return fBitsOnStorage; }
-   virtual std::size_t GetPackedSize(std::size_t nElements = 1U) const { return (nElements * fBitsOnStorage + 7) / 8; }
+   std::size_t GetPackedSize(std::size_t nElements = 1U) const { return (nElements * fBitsOnStorage + 7) / 8; }
 }; // class RColumnElementBase
 
 /**
@@ -692,42 +701,27 @@ public:
 namespace BitPacking {
 
 using Word_t = std::uintmax_t;
-inline constexpr std::size_t kBitsPerWord = sizeof(Word_t) * 8;
+constexpr std::size_t kBitsPerWord = sizeof(Word_t) * 8;
 
 /// Returns the minimum safe size (in bytes) of a buffer that is intended to be used as a destination for PackBits
 /// or a source for UnpackBits.
 /// Passing a buffer that's less than this size will cause invalid memory reads and writes.
 constexpr std::size_t MinBufSize(std::size_t count, std::size_t nDstBits)
 {
-   return (count != 0) * sizeof(Word_t) *
-          std::max<std::size_t>(1, (count * nDstBits + kBitsPerWord - 1) / kBitsPerWord);
+   return (count * nDstBits + 7) / 8;
 }
 
 /// Tightly packs `count` items of size `sizeofSrc` contained in `src` into `dst` using `nDstBits` per item.
 /// It must be  `0 < sizeofSrc <= 8`  and  `0 < nDstBits <= sizeofSrc * 8`.
-/// The extra least significant bits are dropped.
+/// The extra least significant bits are dropped (assuming LE ordering of the items in `src`).
+/// Note that this function doesn't do any byte reordering for you.
 /// IMPORTANT: the size of `dst` must be at least `MinBufSize(count, nBitBits)`
 void PackBits(void *dst, const void *src, std::size_t count, std::size_t sizeofSrc, std::size_t nDstBits);
 
 /// Undoes the effect of `PackBits`. The bits that were truncated in the packed representation
 /// are filled with zeroes.
-/// It must be  `0 < sizeofDst <= 8`  and  `0 < nSrcBits <= sizeofDst * 8`.
-/// IMPORTANT: the size of `src` must be at least `MinBufSize(count, nBitBits)`
+/// `src` and `dst` must be at least `MinBufSize(count, nDstBits)` bytes long.
 void UnpackBits(void *dst, const void *src, std::size_t count, std::size_t sizeofDst, std::size_t nSrcBits);
-
-template <typename T>
-void PackBits(void *dst, const T *src, std::size_t count, std::size_t nDstBits)
-{
-   static_assert(std::is_trivial_v<T>);
-   return PackBits(dst, src, count, sizeof(T), nDstBits);
-}
-
-template <typename T>
-void UnpackBits(T *dst, const void *src, std::size_t count, std::size_t nSrcBits)
-{
-   static_assert(std::is_trivial_v<T>);
-   return UnpackBits(dst, src, count, sizeof(T), nSrcBits);
-}
 
 }; // namespace BitPacking
 
@@ -747,19 +741,24 @@ public:
 
    bool IsMappable() const final { return kIsMappable; }
 
-   std::size_t GetPackedSize(std::size_t nElements = 1U) const final
-   {
-      return BitPacking::MinBufSize(nElements, fBitsOnStorage);
-   }
-
    void Pack(void *dst, void *src, std::size_t count) const final
    {
-      BitPacking::PackBits(dst, reinterpret_cast<const float *>(src), count, fBitsOnStorage);
+      R__ASSERT(GetPackedSize(count) == BitPacking::MinBufSize(count, fBitsOnStorage));
+
+#if R__LITTLE_ENDIAN == 0
+      InPlaceBswap<sizeof(float)>(src, count);
+#endif
+      BitPacking::PackBits(dst, reinterpret_cast<const float *>(src), count, sizeof(float), fBitsOnStorage);
    }
 
    void Unpack(void *dst, void *src, std::size_t count) const final
    {
-      BitPacking::UnpackBits(reinterpret_cast<float *>(dst), src, count, fBitsOnStorage);
+      R__ASSERT(GetPackedSize(count) == BitPacking::MinBufSize(count, fBitsOnStorage));
+
+      BitPacking::UnpackBits(reinterpret_cast<float *>(dst), src, count, sizeof(float), fBitsOnStorage);
+#if R__LITTLE_ENDIAN == 0
+      InPlaceBswap<sizeof(float)>(dst, count);
+#endif
    }
 };
 
