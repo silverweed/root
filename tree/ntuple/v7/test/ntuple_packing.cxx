@@ -612,11 +612,27 @@ TEST(Packing, Real32Quant)
       }
    }
    {
-      constexpr auto kBitsOnStorage = 10;
+      constexpr auto kBitsOnStorage = 14;
+      RColumnElement<double, EColumnType::kReal32Quant> element;
+      double min = -1, max = 1;
+      element.SetBitsOnStorage(kBitsOnStorage);
+      element.SetValueRange(min, max);
+
+      double elem[5] = {-1, -0.5, 0, 0.5, 1};
+      unsigned char packed[BitPacking::MinBufSize(5, kBitsOnStorage)];
+      element.Pack(packed, elem, 5);
+
+      double unpacked[5];
+      element.Unpack(unpacked, packed, 5);
+      for (int i = 0; i < 5; ++i)
+         EXPECT_NEAR(unpacked[i], elem[i], 0.001f);
+   }
+   {
+      constexpr auto kBitsOnStorage = 13;
       constexpr auto N = 1000;
       using T = double;
       RColumnElement<T, EColumnType::kReal32Quant> element;
-      T min = -1e10, max = -100;
+      T min = -1000, max = -100;
       element.SetBitsOnStorage(kBitsOnStorage);
       element.SetValueRange(min, max);
 
@@ -633,7 +649,7 @@ TEST(Packing, Real32Quant)
       T unpacked[N];
       element.Unpack(unpacked, out.get(), N);
       for (int i = 0; i < N; ++i) {
-         EXPECT_NEAR(unpacked[i], f[i], 0.001f);
+         EXPECT_NEAR(unpacked[i], f[i], 0.2f);
       }
    }
 }

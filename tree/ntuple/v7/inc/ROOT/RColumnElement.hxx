@@ -794,10 +794,11 @@ using Quantized_t = std::uint32_t;
 #endif
 }
 
-/// Converts the array of `count` floating point numbers in `src` into an array of their quantized representations.
+/// Converts the array `src` of `count` floating point numbers into an array of their quantized representations.
 /// Each element of `src` is assumed to be in the inclusive range [min, max].
-/// The quantized representation will consist of unsigned integers of at most `nQuantBits`, with `8 <= nQuantBits <=
-/// 32`. The unused bits are kepts in the LSB of the quantized integers, to allow for easy bit packing of those integers
+/// The quantized representation will consist of unsigned integers of at most `nQuantBits`, with
+/// `kReal32QuantBitsMin <= nQuantBits <= kreal32QuantBitsMax`.
+/// The unused bits are stored in the LSB of the quantized integers, to allow for easy bit packing of those integers
 /// via BitPacking::PackBits().
 template <typename T>
 void QuantizeReals(Quantized_t *dst, const T *src, std::size_t count, double min, double max, std::size_t nQuantBits)
@@ -854,16 +855,18 @@ void UnquantizeReals(T *dst, const Quantized_t *src, std::size_t count, double m
 }
 } // namespace Quantize
 
-template <>
-class RColumnElement<float, EColumnType::kReal32Quant> : public RColumnElementBase {
+template <typename T>
+class RColumnElementQuantized : public RColumnElementBase {
+   static_assert(std::is_floating_point_v<T>);
+
    double fMin = std::numeric_limits<double>::min();
    double fMax = std::numeric_limits<double>::max();
 
 public:
    static constexpr bool kIsMappable = false;
-   static constexpr std::size_t kSize = sizeof(float);
+   static constexpr std::size_t kSize = sizeof(T);
 
-   RColumnElement() : RColumnElementBase(kSize, kReal32QuantBitsMax) {}
+   RColumnElementQuantized() : RColumnElementBase(kSize, kReal32QuantBitsMax) {}
 
    void SetBitsOnStorage(std::size_t bitsOnStorage) final
    {
@@ -882,7 +885,7 @@ public:
    void Pack(void *dst, void *src, std::size_t count) const final
    {
       auto quantized = std::make_unique<Quantize::Quantized_t[]>(count);
-      Quantize::QuantizeReals(quantized.get(), reinterpret_cast<const float *>(src), count, fMin, fMax, fBitsOnStorage);
+      Quantize::QuantizeReals(quantized.get(), reinterpret_cast<const T *>(src), count, fMin, fMax, fBitsOnStorage);
       BitPacking::PackBits(dst, quantized.get(), count, sizeof(Quantize::Quantized_t), fBitsOnStorage);
    }
 
@@ -890,9 +893,15 @@ public:
    {
       auto quantized = std::make_unique<Quantize::Quantized_t[]>(count);
       BitPacking::UnpackBits(quantized.get(), src, count, sizeof(Quantize::Quantized_t), fBitsOnStorage);
-      Quantize::UnquantizeReals(reinterpret_cast<float *>(dst), quantized.get(), count, fMin, fMax, fBitsOnStorage);
+      Quantize::UnquantizeReals(reinterpret_cast<T *>(dst), quantized.get(), count, fMin, fMax, fBitsOnStorage);
    }
 };
+
+template <>
+class RColumnElement<float, EColumnType::kReal32Quant> : public RColumnElementQuantized<float> {};
+
+template <>
+class RColumnElement<double, EColumnType::kReal32Quant> : public RColumnElementQuantized<double> {};
 
 #define __RCOLUMNELEMENT_SPEC_BODY(CppT, BaseT, BitsOnStorage)  \
    static constexpr std::size_t kSize = sizeof(CppT);           \

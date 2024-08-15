@@ -72,6 +72,7 @@ class RFieldDescriptor {
    friend class Internal::RNTupleDescriptorBuilder;
    friend class Internal::RFieldDescriptorBuilder;
 
+public:
    struct RValueRange {
       double fMin, fMax;
    };
@@ -1202,6 +1203,11 @@ public:
    RFieldDescriptorBuilder &TypeChecksum(const std::optional<std::uint32_t> typeChecksum)
    {
       fField.fTypeChecksum = typeChecksum;
+      return *this;
+   }
+   RFieldDescriptorBuilder &ValueRange(const std::optional<RFieldDescriptor::RValueRange> valueRange)
+   {
+      fField.fValueRange = valueRange;
       return *this;
    }
    DescriptorId_t GetParentId() const { return fField.fParentId; }
