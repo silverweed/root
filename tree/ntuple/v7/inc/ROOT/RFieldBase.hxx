@@ -65,7 +65,7 @@ This is and can only be partially enforced through C++.
 */
 // clang-format on
 class RFieldBase {
-   friend struct ROOT::Experimental::Internal::RFieldCallbackInjector; // used for unit tests
+   friend struct ROOT::Experimental::Internal::RFieldCallbackInjector;       // used for unit tests
    friend struct ROOT::Experimental::Internal::RFieldRepresentationModifier; // used for unit tests
    friend void Internal::CallFlushColumnsOnField(RFieldBase &);
    friend void Internal::CallCommitClusterOnField(RFieldBase &);
@@ -470,7 +470,8 @@ public:
    std::unique_ptr<RFieldBase> Clone(std::string_view newName) const;
 
    /// Factory method to resurrect a field from the stored on-disk type information
-   static RResult<std::unique_ptr<RFieldBase>> Create(const std::string &fieldName, const std::string &typeName);
+   static RResult<std::unique_ptr<RFieldBase>>
+   Create(const std::string &fieldName, const std::string &typeName, bool continueOnError = false);
    /// Checks if the given type is supported by RNTuple. In case of success, the result vector is empty.
    /// Otherwise there is an error record for each failing sub field (sub type).
    static std::vector<RCheckResult> Check(const std::string &fieldName, const std::string &typeName);
@@ -514,7 +515,12 @@ public:
    const std::string &GetTypeAlias() const { return fTypeAlias; }
    ENTupleStructure GetStructure() const { return fStructure; }
    std::size_t GetNRepetitions() const { return fNRepetitions; }
-   NTupleSize_t GetNElements() const { return fPrincipalColumn->GetNElements(); }
+   NTupleSize_t GetNElements() const
+   {
+      if (fState == EState::kUnconnected)
+         throw RException(R__FAIL("Cannot call GetNElements() on an unconnected field!"));
+      return fPrincipalColumn->GetNElements();
+   }
    const RFieldBase *GetParent() const { return fParent; }
    std::vector<RFieldBase *> GetSubFields();
    std::vector<const RFieldBase *> GetSubFields() const;
