@@ -438,5 +438,7 @@ TEST(RNTupleCompat, FutureFieldStructuralRole_Nested)
       FAIL() << "trying to get a field with unknown role should fail";
    } catch (const RException &err) {
       EXPECT_THAT(err.what(), testing::HasSubstr("invalid field"));
+=======
+>>>>>>> 72bcdddc5a ([ntuple] support loading model in fwd compat mode)
    }
 }
