@@ -279,8 +279,8 @@ CompareDescriptorStructure(const RNTupleDescriptor &dst, const RNTupleDescriptor
          if (srcName != dstName) {
             std::stringstream ss;
             ss << "Field `" << fieldName
-               << "` is projected to a different field than a previously-seen field with the same name (old: " << dstName
-               << ", new: " << srcName << ")";
+               << "` is projected to a different field than a previously-seen field with the same name (old: "
+               << dstName << ", new: " << srcName << ")";
             errors.push_back(ss.str());
          }
       }
@@ -379,32 +379,39 @@ static std::string XXXGetCanonicalTypeName(const std::string &typeName)
    return TClassEdit::ResolveTypedef(typeName.c_str());
 }
 
+static void XXXAddUnsplitField(const RNTupleDescriptor &desc, const RFieldDescriptor &fieldDesc, RNTupleModel &model)
+{
+   auto typeName = XXXGetCanonicalTypeName(fieldDesc.GetTypeName());
+   auto field = fieldDesc.CreateField(desc);
+   if (!fieldDesc.IsProjectedField()) {
+      if (typeName == "std::int32_t" || typeName == "int") {
+         Info("RNtuple::Merge", "Toggled SplitInt32 -> Int32 (field %s)", fieldDesc.GetFieldName().c_str());
+         field->SetColumnRepresentatives({{EColumnType::kInt32}});
+      } else if (typeName == "std::int64_t" || typeName == "long") {
+         Info("RNtuple::Merge", "Toggled SplitInt64 -> Int64 (field %s)", fieldDesc.GetFieldName().c_str());
+         field->SetColumnRepresentatives({{EColumnType::kInt64}});
+      } else if (typeName == "float") {
+         Info("RNtuple::Merge", "Toggled SplitReal32 -> Real32 (field %s)", fieldDesc.GetFieldName().c_str());
+         field->SetColumnRepresentatives({{EColumnType::kReal32}});
+      } else if (typeName == "double") {
+         Info("RNtuple::Merge", "Toggled SplitReal64 -> Real64 (field %s)", fieldDesc.GetFieldName().c_str());
+         field->SetColumnRepresentatives({{EColumnType::kReal64}});
+      } else if (fieldDesc.GetStructure() == ENTupleStructure::kRecord) {
+         for (const auto &childDesc : desc.GetFieldIterable(fieldDesc)) {
+            XXXAddUnsplitField(desc, childDesc, model);
+         }
+      }
+      model.AddField(std::move(field));
+   } else {
+      // XXX: not adding projected fields
+   }
+}
+
 static std::unique_ptr<RNTupleModel> XXXCreateModelToggleSplit(const RNTupleDescriptor &desc)
 {
    auto model = RNTupleModel::Create();
    for (auto &fieldDesc : desc.GetTopLevelFields()) {
-      if (fieldDesc.IsProjectedField()) {
-         model->AddField(fieldDesc.CreateField(desc));
-         continue;
-      }
-
-      auto typeName = XXXGetCanonicalTypeName(fieldDesc.GetTypeName());
-
-      auto field = fieldDesc.CreateField(desc);
-      if (typeName == "std::int32_t" || typeName == "int") {
-         Info("RNtuple::Merge", "Toggled SplintInt32 -> Int32 (field %s)", fieldDesc.GetFieldName().c_str());
-         field->SetColumnRepresentatives({{EColumnType::kInt32}});
-      } else if (typeName == "std::int64_t" || typeName == "long") {
-         Info("RNtuple::Merge", "Toggled SplintInt64 -> Int64 (field %s)", fieldDesc.GetFieldName().c_str());
-         field->SetColumnRepresentatives({{EColumnType::kInt64}});
-      } else if (typeName == "float") {
-         Info("RNtuple::Merge", "Toggled SplintReal32 -> Real32 (field %s)", fieldDesc.GetFieldName().c_str());
-         field->SetColumnRepresentatives({{EColumnType::kReal32}});
-      } else if (typeName == "double") {
-         Info("RNtuple::Merge", "Toggled SplintReal64 -> Real64 (field %s)", fieldDesc.GetFieldName().c_str());
-         field->SetColumnRepresentatives({{EColumnType::kReal64}});
-      }
-      model->AddField(std::move(field));
+      XXXAddUnsplitField(desc, fieldDesc, *model);
    }
    model->Freeze();
    return model;
