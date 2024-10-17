@@ -38,6 +38,9 @@
 #include <unordered_map>
 #include <vector>
 
+// XXX
+#include <TClassEdit.h>
+
 using namespace ROOT::Experimental;
 using namespace ROOT::Experimental::Internal;
 
@@ -367,6 +370,46 @@ static void ExtendDestinationModel(std::span<const RFieldDescriptor *> newFields
    mergeData.fDestination.UpdateSchema(changeset, mergeData.fNumDstEntries);
 }
 
+static std::string XXXGetCanonicalTypeName(const std::string &typeName)
+{
+   // The following types are asummed to be canonical names; thus, do not perform `typedef` resolution on those
+   if (typeName.substr(0, 5) == "std::" || typeName.substr(0, 39) == "ROOT::Experimental::RNTupleCardinality<")
+      return typeName;
+
+   return TClassEdit::ResolveTypedef(typeName.c_str());
+}
+
+static std::unique_ptr<RNTupleModel> XXXCreateModelToggleSplit(const RNTupleDescriptor &desc)
+{
+   auto model = RNTupleModel::Create();
+   for (auto &fieldDesc : desc.GetTopLevelFields()) {
+      if (fieldDesc.IsProjectedField()) {
+         model->AddField(fieldDesc.CreateField(desc));
+         continue;
+      }
+
+      auto typeName = XXXGetCanonicalTypeName(fieldDesc.GetTypeName());
+
+      auto field = fieldDesc.CreateField(desc);
+      if (typeName == "std::int32_t" || typeName == "int") {
+         Info("RNtuple::Merge", "Toggled SplintInt32 -> Int32 (field %s)", fieldDesc.GetFieldName().c_str());
+         field->SetColumnRepresentatives({{EColumnType::kInt32}});
+      } else if (typeName == "std::int64_t" || typeName == "long") {
+         Info("RNtuple::Merge", "Toggled SplintInt64 -> Int64 (field %s)", fieldDesc.GetFieldName().c_str());
+         field->SetColumnRepresentatives({{EColumnType::kInt64}});
+      } else if (typeName == "float") {
+         Info("RNtuple::Merge", "Toggled SplintReal32 -> Real32 (field %s)", fieldDesc.GetFieldName().c_str());
+         field->SetColumnRepresentatives({{EColumnType::kReal32}});
+      } else if (typeName == "double") {
+         Info("RNtuple::Merge", "Toggled SplintReal64 -> Real64 (field %s)", fieldDesc.GetFieldName().c_str());
+         field->SetColumnRepresentatives({{EColumnType::kReal64}});
+      }
+      model->AddField(std::move(field));
+   }
+   model->Freeze();
+   return model;
+}
+
 // Merges all columns appearing both in the source and destination RNTuples, just copying them if their
 // compression matches ("fast merge") or by unsealing and resealing them with the proper compression.
 void RNTupleMerger::MergeCommonColumns(RClusterPool &clusterPool, DescriptorId_t clusterId,
@@ -400,8 +443,7 @@ void RNTupleMerger::MergeCommonColumns(RClusterPool &clusterPool, DescriptorId_t
 
       // Each column range potentially has a distinct compression settings
       const auto colRangeCompressionSettings = clusterDesc.GetColumnRange(columnId).fCompressionSettings;
-      const bool needsCompressionChange = mergeData.fMergeOpts.fCompressionSettings != kUnknownCompressionSettings &&
-                                          colRangeCompressionSettings != mergeData.fMergeOpts.fCompressionSettings;
+      const bool needsCompressionChange = true; // XXX
 
       if (needsCompressionChange && mergeData.fMergeOpts.fExtraVerbose)
          Info("RNTuple::Merge", "Column %s: changing source compression from %d to %d", column.fColumnName.c_str(),
@@ -685,7 +727,7 @@ RNTupleMerger::Merge(std::span<RPageSource *> sources, RPageSink &destination, c
 
       // Create sink from the input model if not initialized
       if (!destination.IsInitialized()) {
-         model = srcDescriptor->CreateModel();
+         model = XXXCreateModelToggleSplit(srcDescriptor.GetRef());
          destination.Init(*model);
       }
 
