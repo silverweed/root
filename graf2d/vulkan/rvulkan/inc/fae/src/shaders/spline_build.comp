@@ -1,0 +1,68 @@
+#version 450
+
+#define N_STEPS 32
+#define N_PACKED_CONTROL_POINTS 3
+
+// Y dimension: which spline we're operating on
+// X dimension: which segment of the spline we're operating on
+layout (local_size_y = 32, local_size_x = N_STEPS) in;
+
+layout (std140, push_constant) uniform Push_Constant {
+    vec4 view_pos_ws_thickness;
+} pc;
+
+layout (std140, binding = 0) readonly buffer Cpoints_Buf {
+    // tightly-packed control points of the cubic bezier
+    vec4 cp[];
+} in_buf;
+
+layout (std140, binding = 1) buffer Vertex_Buf {
+    // NOTE: w is unused
+    vec4 vertices[];
+} out_buf;
+
+vec3 cubic_bezier(float t, vec3 p0, vec3 p1, vec3 p2, vec3 p3)
+{
+    float s = 1.0 - t;
+    vec3 res = p0*s*s*s + 3.0*p1*s*s*t + 3.0*p2*s*t*t + p3*t*t*t;
+    return res;
+}
+
+void main()
+{
+    uint step = gl_GlobalInvocationID.x;
+    uint spline_idx = gl_GlobalInvocationID.y;
+
+    // Unpack the points
+    uint first_cp_idx = spline_idx * N_PACKED_CONTROL_POINTS;
+    vec4 sp0 = in_buf.cp[first_cp_idx];
+    vec4 sp1 = in_buf.cp[first_cp_idx + 1];
+    vec4 sp2 = in_buf.cp[first_cp_idx + 2];
+
+    vec3 cp0 = sp0.xyz;
+    vec3 cp1 = vec3(sp0.w, sp1.xy);
+    vec3 cp2 = vec3(sp1.zw, sp2.x);
+    vec3 cp3 = sp2.yzw;
+
+    // calculate cubic bezier at our point and next
+    float t0 = float(step) / float(N_STEPS - 1);
+    float t1 = float(step + 1) / float(N_STEPS - 1);
+    vec3 p0 = cubic_bezier(t0, cp0, cp1, cp2, cp3);
+    vec3 p1 = cubic_bezier(t1, cp0, cp1, cp2, cp3);
+
+    // find plane facing the camera
+    vec3 view_pos = pc.view_pos_ws_thickness.xyz;
+    vec3 view_dir = p0 - view_pos;
+    vec3 x = p1 - p0;
+    vec3 z = normalize(cross(x, view_dir));
+
+    // build vertices
+    float half_thickness = 0.5 * pc.view_pos_ws_thickness.w;
+    vec3 v0 = p0 + z * half_thickness;
+    vec3 v1 = p0 - z * half_thickness;
+
+    // write out vertices
+    uint first_vertex_idx = spline_idx * 2 * N_STEPS + 2 * step;
+    out_buf.vertices[first_vertex_idx]     = vec4(v0, 0.0);
+    out_buf.vertices[first_vertex_idx + 1] = vec4(v1, 0.0);
+}

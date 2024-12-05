@@ -1,0 +1,108 @@
+#version 450
+
+#include "instance_data.glsl"
+
+layout (local_size_x = 256) in;
+
+struct Frustum {
+    // XXX: we could avoid passing the far plane
+    vec4 plane[6];
+};
+
+// Culling flags
+const uint Cull_Disable = 1;
+
+layout (push_constant) uniform Push_Constants {
+    uint n_instances;    
+    uint flags;
+    Frustum ws_frustum;
+};
+
+layout (binding = 0) readonly buffer Instance_Data_Buf {
+    Instance_Data inst_data[];
+};
+
+struct Indirect_Cmd {
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+};
+
+layout (binding = 1) buffer Indirect_Buf {
+    Indirect_Cmd cmds[];
+};
+
+layout (binding = 2) buffer Indirect_Buf_Count {
+    uint instance_count;
+};
+
+// local quad vertex positions, in meters
+const vec2 rect_positions[4] = vec2[](
+    vec2(-0.5, -0.5),
+    vec2(0.5, 0.5),
+    vec2(-0.5, 0.5),
+    vec2(0.5, -0.5)
+);
+
+bool quad_visible(Frustum frustum, vec3 center, vec2 size, vec3 quad_axes[3])
+{
+    // NOTE: not checking the far plane
+    for (int i = 0; i < 5; ++i) {
+        vec4 p = frustum.plane[i];
+        // effective radius of the quad
+        float rg = abs(dot(p.xyz, quad_axes[0]) * size.x) + 
+                    abs(dot(p.xyz, quad_axes[1]) * 1.0) +
+                    abs(dot(p.xyz, quad_axes[2]) * size.y);
+        if (dot(p, vec4(center, 1.0)) <= -rg)
+            return false;
+    }
+    return true;
+}
+
+void main()
+{
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= n_instances)
+        return;
+
+    // get instance transform matrix
+    mat4 world_to_local = inst_data[gid].model;
+
+    // compute world positions of vertices    
+    vec3 wpos[4] = vec3[](
+        vec3(world_to_local * vec4(rect_positions[0].x, 0.0, rect_positions[0].y, 1.0)),
+        vec3(world_to_local * vec4(rect_positions[1].x, 0.0, rect_positions[1].y, 1.0)),
+        vec3(world_to_local * vec4(rect_positions[2].x, 0.0, rect_positions[2].y, 1.0)),
+        vec3(world_to_local * vec4(rect_positions[3].x, 0.0, rect_positions[3].y, 1.0))
+    );
+    vec3 ws_center = (wpos[0] + wpos[1] + wpos[2] + wpos[3]) * 0.25;
+    vec2 ws_size = vec2(
+        abs(wpos[3].x - wpos[0].x),
+        abs(wpos[2].z - wpos[0].z)
+    );
+    vec3 ws_axes[3] = vec3[](
+        normalize(world_to_local[0].xyz),
+        normalize(world_to_local[1].xyz),
+        normalize(world_to_local[2].xyz)
+    );
+
+    bool visible = ((flags & Cull_Disable) != 0) || quad_visible(ws_frustum, ws_center, ws_size, ws_axes);
+
+    uint out_idx = gid;
+    cmds[out_idx].vertex_count = 4;
+    cmds[out_idx].first_vertex = 0;
+    cmds[out_idx].first_instance = gid;
+    if (visible) {
+        cmds[out_idx].instance_count = 1;
+    } else {
+        cmds[out_idx].instance_count = 0;
+    }
+
+    // This is what we'd do instead of the if/else above if vkCmdDrawIndirectCount didn't crash:
+    // uint out_idx = atomicAdd(instance_count, 1);
+    // cmds[out_idx].vertex_count = 6;
+    // cmds[out_idx].instance_count = 1;
+    // cmds[out_idx].first_vertex = 0;
+    // cmds[out_idx].first_instance = gid;
+}
