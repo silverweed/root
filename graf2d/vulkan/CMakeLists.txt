@@ -24,4 +24,4 @@ ROOT_STANDARD_LIBRARY_PACKAGE(GVulkan
 
 target_include_directories(GVulkan PRIVATE ${Vulkan_INCLUDE_DIR})
 target_include_directories(GVulkan PRIVATE ${FREETYPE_INCLUDE_DIR})
-target_include_directories(GVulkan PRIVATE "${PROJECT_SOURCE_DIR}/rvulkan/inc")
+target_include_directories(GVulkan PRIVATE "${PROJECT_SOURCE_DIR}/graf2d/vulkan/rvulkan/inc")

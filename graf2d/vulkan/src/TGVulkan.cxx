@@ -5,7 +5,7 @@
 #include <ROOT/RError.hxx>
 #include <ROOT/RLogger.hxx>
 
-using ROOT::Experimental::RException;
+using ROOT::RException;
 
 // RVkWindow
 // -----------------------------------------

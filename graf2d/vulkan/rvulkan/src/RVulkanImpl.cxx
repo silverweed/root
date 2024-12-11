@@ -13,10 +13,10 @@
 
 #include <vulkan/vulkan.h>
 
-// #define STBI_NO_STDIO
-// #define STBI_ONLY_PNG
-// #define STB_IMAGE_IMPLEMENTATION
-// #include "stb_image.h"
+#define STBI_NO_STDIO
+#define STBI_ONLY_PNG
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #include "fae/core/types.h"
 #include "fae/core/mem.h"
