@@ -73,8 +73,9 @@ else()
 endif()
 
 if(root7)
-  set(RIO_EXTRA_HEADERS ROOT/RFile.hxx)
-  target_sources(RIO PRIVATE v7/src/RFile.cxx)
+  # set(RIO_EXTRA_HEADERS ROOT/RFile.hxx)
+  # target_sources(RIO PRIVATE v7/src/RFile.cxx)
+  # add_subdirectory(v7)
 endif()
 
 if(uring)
