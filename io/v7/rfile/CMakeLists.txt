@@ -11,6 +11,8 @@ SOURCES
   LinkDef.h
 DEPENDENCIES
   RIO
+  Tree
+  Hist
 )
 
 ROOT_ADD_TEST_SUBDIRECTORY(test)

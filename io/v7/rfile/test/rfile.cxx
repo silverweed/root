@@ -3,6 +3,7 @@
 #include <TFile.h>
 #include <TH1D.h>
 #include <TROOT.h>
+#include <ROOT/RError.hxx>
 #include <ROOT/RFile.hxx>
 
 using ROOT::Experimental::RFile;
@@ -52,14 +53,17 @@ TEST(RFile, OpenForReading)
 
    auto file = RFile::OpenForReading(fileGuard.GetPath());
    auto hist = file->Get<TH1D>("hist");
-   EXPECT_TRUE(hist.IsValid());
+   EXPECT_TRUE(hist);
 
-   EXPECT_FALSE(file->Get<TH1D>("inexistent").IsValid());
-   EXPECT_FALSE(file->Get<TH1F>("hist").IsValid());
-   EXPECT_FALSE(file->Get<TH1>("hist").IsValid());
+   EXPECT_FALSE(file->Get<TH1D>("inexistent"));
+   EXPECT_FALSE(file->Get<TH1F>("hist"));
+   EXPECT_TRUE(file->Get<TH1>("hist"));
 
    // We do NOT want to globally register RFiles ever.
    EXPECT_EQ(ROOT::GetROOT()->GetListOfFiles()->GetSize(), 0);
+
+   std::string foo = "foo";
+   EXPECT_THROW(file->Put("foo", foo), ROOT::RException);
 }
 
 TEST(RFile, OpenForWriting)
@@ -70,8 +74,36 @@ TEST(RFile, OpenForWriting)
    hist->FillRandom("gaus", 1000);
 
    auto file = RFile::Recreate(fileGuard.GetPath());
-   file->Put("hist", std::move(hist));
-   EXPECT_TRUE(file->Get<TH1D>("hist").IsValid());
+   file->Put("hist", *hist);
+   EXPECT_TRUE(file->Get<TH1D>("hist"));
 
    EXPECT_EQ(ROOT::GetROOT()->GetListOfFiles()->GetSize(), 0);
+}
+
+TEST(RFile, OpenForUpdating)
+{
+   FileRaii fileGuard("test_rfile_update.root");
+
+   {
+      TH1D hist("hist", "", 100, -10, 10);
+      hist.FillRandom("gaus", 1000);
+      auto file = RFile::Recreate(fileGuard.GetPath());
+      file->Put("hist", hist);
+   }
+
+   auto file = RFile::OpenForUpdate(fileGuard.GetPath());
+   EXPECT_TRUE(file->Get<TH1D>("hist"));
+   {
+      auto hist2 = std::make_unique<TH1D>("hist2", "a different hist", 10, -1, 1);
+      file->Put("hist2", *hist2);
+   }
+   EXPECT_TRUE(file->Get<TH1D>("hist2"));
+
+   EXPECT_EQ(ROOT::GetROOT()->GetListOfFiles()->GetSize(), 0);
+}
+
+TEST(RFile, WrongExtension)
+{
+   FileRaii fileGuard("test_rfile_wrong.xml");
+   EXPECT_THROW(RFile::Recreate(fileGuard.GetPath()), ROOT::RException);
 }
