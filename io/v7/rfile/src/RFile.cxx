@@ -15,30 +15,82 @@
 
 #include "ROOT/RFile.hxx"
 
+#include <ROOT/RError.hxx>
+#include <TTree.h>
+#include <TGraph2D.h>
+#include <TH1.h>
+
 using ROOT::Experimental::RFile;
-using ROOT::Experimental::RFileRef;
+// using ROOT::Experimental::RFileRef;
+
+static void CheckExtension(std::string_view path)
+{
+   if (path.size() < 5 || path.compare(path.size() - 5, 5, ".root") != 0) {
+      throw ROOT::RException(R__FAIL(std::string("Only .root files are supported.")));
+   }
+}
  
 std::unique_ptr<RFile> RFile::OpenForReading(std::string_view path)
 {
-   auto tfile = std::unique_ptr<TFile>(TFile::Open(std::string(path).c_str(), "READ"));//_WITHOUT_GLOBALREGISTRATION"));
+   CheckExtension(path);
+   
+   auto tfile = std::unique_ptr<TFile>(TFile::Open(std::string(path).c_str(), "READ_WITHOUT_GLOBALREGISTRATION"));
+   auto rfile = std::unique_ptr<RFile>(new RFile(std::move(tfile)));
+   return rfile;
+}
+
+std::unique_ptr<RFile> RFile::OpenForUpdate(std::string_view path)
+{
+   CheckExtension(path);
+
+   // NOTE: "UPDATE_WITHOUT_GLOBALREGISTRATION" is undocumented but works.
+   auto tfile = std::unique_ptr<TFile>(TFile::Open(std::string(path).c_str(), "UPDATE_WITHOUT_GLOBALREGISTRATION"));
    auto rfile = std::unique_ptr<RFile>(new RFile(std::move(tfile)));
    return rfile;
 }
 
 std::unique_ptr<RFile> RFile::Recreate(std::string_view path)
 {
-   auto tfile = std::unique_ptr<TFile>(TFile::Open(std::string(path).c_str(), "RECREATE"));
+   CheckExtension(path);
+
+   // NOTE: "RECREATE_WITHOUT_GLOBALREGISTRATION" is undocumented but works.
+   auto tfile = std::unique_ptr<TFile>(TFile::Open(std::string(path).c_str(), "RECREATE_WITHOUT_GLOBALREGISTRATION"));
    auto rfile = std::unique_ptr<RFile>(new RFile(std::move(tfile)));
    return rfile;
 }
 
 void *RFile::GetUntyped(const char *name, const TClass *type) const
 {
+   if (!type) {
+      throw ROOT::RException(R__FAIL(std::string("Could not determine type of object ") + name));
+   }
    void *obj = fFile->GetObjectChecked(name, type);
+
+   if (obj) {
+      // Disavow any ownership on `obj`
+      if (type->InheritsFrom("TH1"))
+         static_cast<TH1 *>(obj)->SetDirectory(nullptr);
+      else if (type->InheritsFrom("TTree"))
+         static_cast<TTree *>(obj)->SetDirectory(nullptr);
+      else if (type->InheritsFrom("TGraph2D"))
+         static_cast<TGraph2D *>(obj)->SetDirectory(nullptr);
+   }
+
    return obj;
 }
 
 void RFile::PutUntyped(const char *name, const TClass *type, void *obj)
 {
-   fFile->WriteObjectAny(obj, type, name);
+   if (!type) {
+      throw ROOT::RException(R__FAIL(std::string("Could not determine type of object ") + name));
+   }
+   if (!fFile->IsWritable()) {
+      throw ROOT::RException(R__FAIL("File is not writable"));
+   }
+
+   int success = fFile->WriteObjectAny(obj, type, name);
+
+   if (!success) {
+      throw ROOT::RException(R__FAIL(std::string("Failed to write ") + name + " to file"));
+   }
 }
