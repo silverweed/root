@@ -15,7 +15,6 @@
 
 #include "ROOT/RFile.hxx"
 
-#include <ROOT/RError.hxx>
 #include <TTree.h>
 #include <TGraph2D.h>
 #include <TH1.h>

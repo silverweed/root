@@ -18,36 +18,63 @@
 
 #include <TFile.h>
 
+#include <ROOT/RError.hxx>
 #include <string_view>
 #include <memory>
 
 namespace ROOT {
 namespace Experimental {
 
-// class RFile;
+class RFile;
 
-// template <typename T>
-// class RFileRef {
-//    friend class RFile;
-   
-//    T *fInner = nullptr;
+namespace Internal {
+struct RFileProxy {
+   const RFile *fFile;
+   RFileProxy(const RFile *file) : fFile(file) {}
+};
+} // namespace Internal
 
-//    explicit RFileRef(T *inner) : fInner(inner) {}
+template <typename T>
+class RFileRef {
+   friend class RFile;
 
-// public:
-//    bool IsValid() const { return !!fInner; }
-//    operator bool() const { return IsValid(); }
+   std::weak_ptr<const Internal::RFileProxy> fParentFile;
+   std::weak_ptr<T> fInner;
+   std::string fName;
 
-//    T *Get() { return fInner; }
-//    T *operator *() { return fInner; }
-//    T *operator ->() { return fInner; }
-// };
+   explicit RFileRef(std::weak_ptr<const Internal::RFileProxy> parentFile, std::string_view name,
+                     const std::shared_ptr<T> &inner = nullptr)
+      : fParentFile(parentFile), fInner(inner), fName(name)
+   {
+   }
 
-class RFile {
+public:
+   operator bool() const { return !fInner.expired() && !!fInner.lock(); }
+
+   T *Get() { return fInner.expired() ? nullptr : fInner.lock().get(); }
+   T *operator*() { return fInner.lock().get(); }
+   T *operator->() { return fInner.lock().get(); }
+
+   std::unique_ptr<T> Clone() const;
+};
+
+class RFile : std::enable_shared_from_this<RFile> {
+public: // XXX: should not be public, but the dictionary fails to compile..
+   struct RFileEntry {
+      const TClass *fClass;
+      std::shared_ptr<void> fData;
+   };
+
+private:
+   std::shared_ptr<const Internal::RFileProxy> fSelf;
    std::unique_ptr<TFile> fFile;
-   
-   explicit RFile(std::unique_ptr<TFile> file) : fFile(std::move(file)) {}
-   
+   mutable std::unordered_map<std::string, RFileEntry> fCache;
+
+   explicit RFile(std::unique_ptr<TFile> file)
+      : fSelf(std::make_shared<Internal::RFileProxy>(this)), fFile(std::move(file))
+   {
+   }
+
    // NOTE: these strings are const char * because they need to be passed to TFile
    /// Gets object `name` from the file and returns an **owning** pointer to it.
    /// The caller should immediately wrap it into a unique_ptr of the type described by `type`.
@@ -55,7 +82,7 @@ class RFile {
    /// Writes `obj` to file, without taking its ownership.
    void PutUntyped(const char *name, const TClass *type, void *obj);
 
-public: 
+public:
    ///// Factory methods /////
 
    /// Opens the file for reading
@@ -72,23 +99,56 @@ public:
    // Retrieves an object from the file.
    // If the object is not there, returns an invalid ref.
    template <typename T>
-   std::unique_ptr<T> Get(std::string_view name) const {
+   RFileRef<T> Get(std::string_view name) const
+   {
+      std::string nameStr(name);
+      const TClass *cls = TClass::GetClass(typeid(T));
+      if (auto it = fCache.find(nameStr); it != fCache.end()) {
+         if (!it->second.fClass->InheritsFrom(cls)) {
+            return RFileRef<T>{fSelf, name};
+         }
+         return RFileRef{fSelf, name, std::static_pointer_cast<T>(it->second.fData)};
+      }
+      void *obj = GetUntyped(nameStr.c_str(), cls);
+      if (!obj)
+         return RFileRef<T>{fSelf, name};
+
+      auto entry = RFileEntry{cls, std::shared_ptr<T>(static_cast<T *>(obj))};
+      fCache[nameStr] = entry;
+      return RFileRef{fSelf, name, std::static_pointer_cast<T>(entry.fData)};
+   }
+
+   template <typename T>
+   std::unique_ptr<T> GetCopy(std::string_view name) const
+   {
       std::string nameStr(name);
       const TClass *cls = TClass::GetClass(typeid(T));
       void *obj = GetUntyped(nameStr.c_str(), cls);
-      return std::unique_ptr<T>(static_cast<T *>(obj));
+      return std::unique_ptr<T>{static_cast<T *>(obj)};
    }
 
    // Puts an object into the file.
    // Throws a RException if the file was opened in read-only mode.
    template <typename T>
-   void Put(std::string_view name, T &obj) {
+   void Put(std::string_view name, T &obj)
+   {
       std::string nameStr(name);
       const TClass *cls = TClass::GetClass(typeid(T));
       PutUntyped(nameStr.c_str(), cls, &obj);
    }
 };
-   
+
+template <typename T>
+inline std::unique_ptr<T> RFileRef<T>::Clone() const
+{
+   auto parentFile = fParentFile.lock();
+   auto inner = fInner.lock();
+   if (!parentFile || !inner)
+      return nullptr;
+
+   return parentFile->fFile->GetCopy<T>(fName);
+}
+
 } // namespace Experimental
 } // namespace ROOT
 

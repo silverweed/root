@@ -107,3 +107,36 @@ TEST(RFile, WrongExtension)
    FileRaii fileGuard("test_rfile_wrong.xml");
    EXPECT_THROW(RFile::Recreate(fileGuard.GetPath()), ROOT::RException);
 }
+
+TEST(RFile, Lifetimes)
+{
+   FileRaii fileGuard("test_rfile_lifetimes.root");
+
+   {
+      auto tfile = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
+      TH1D hist("hist", "", 100, -10, 10);
+      hist.FillRandom("gaus", 1000);
+      tfile->WriteObject(&hist, "hist");
+   }
+
+   {
+      auto file = RFile::OpenForReading(fileGuard.GetPath());
+      auto hist = file->Get<TH1D>("hist");
+      EXPECT_TRUE(hist);
+
+      file.reset(); // close the file
+      EXPECT_FALSE(hist);
+   }
+
+   {
+      auto file = RFile::OpenForReading(fileGuard.GetPath());
+      auto hist = file->Get<TH1D>("hist");
+      auto cloned = hist.Clone();
+      EXPECT_TRUE(hist);
+      EXPECT_NE(cloned, nullptr);
+
+      file.reset(); // close the file
+      EXPECT_FALSE(hist);
+      EXPECT_NE(cloned, nullptr);
+   }
+}
