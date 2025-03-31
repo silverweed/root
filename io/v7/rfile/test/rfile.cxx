@@ -112,12 +112,29 @@ TEST(RFile, WriteReadInDir)
 {
    FileRaii fileGuard("test_rfile_dir.root");
 
-   auto hist = std::make_unique<TH1D>("hist", "", 100, -10, 10);
-   hist->FillRandom("gaus", 1000);
-
    {
+      auto hist = std::make_unique<TH1D>("hist", "", 100, -10, 10);
+      hist->FillRandom("gaus", 1000);
       auto file = RFile::Recreate(fileGuard.GetPath());
       file->Put("a/b/hist", *hist);
+   }
+
+   {
+      auto file = RFile::OpenForReading(fileGuard.GetPath());
+      EXPECT_TRUE(file->Get<TH1D>("a/b/hist"));
+   }
+}
+
+TEST(RFile, WriteReadInTFileDir)
+{
+   FileRaii fileGuard("test_rfile_tfile_dir.root");
+
+   {
+      auto hist = std::make_unique<TH1D>("hist", "", 100, -10, 10);
+      hist->FillRandom("gaus", 1000);
+      TFile file(fileGuard.GetPath().c_str(), "RECREATE");
+      auto *d = file.mkdir("a/b");
+      d->WriteObject(hist.get(), "hist");
    }
    fileGuard.PreserveFile();
 
