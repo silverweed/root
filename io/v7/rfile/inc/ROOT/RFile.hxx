@@ -24,36 +24,17 @@
 namespace ROOT {
 namespace Experimental {
 
-// class RFile;
-
-// template <typename T>
-// class RFileRef {
-//    friend class RFile;
-   
-//    T *fInner = nullptr;
-
-//    explicit RFileRef(T *inner) : fInner(inner) {}
-
-// public:
-//    bool IsValid() const { return !!fInner; }
-//    operator bool() const { return IsValid(); }
-
-//    T *Get() { return fInner; }
-//    T *operator *() { return fInner; }
-//    T *operator ->() { return fInner; }
-// };
-
 class RFile {
    std::unique_ptr<TFile> fFile;
    
    explicit RFile(std::unique_ptr<TFile> file) : fFile(std::move(file)) {}
    
    // NOTE: these strings are const char * because they need to be passed to TFile
-   /// Gets object `name` from the file and returns an **owning** pointer to it.
+   /// Gets object `path` from the file and returns an **owning** pointer to it.
    /// The caller should immediately wrap it into a unique_ptr of the type described by `type`.
-   [[nodiscard]] void *GetUntyped(const char *name, const TClass *type) const;
+   [[nodiscard]] void *GetUntyped(const char *path, const TClass *type) const;
    /// Writes `obj` to file, without taking its ownership.
-   void PutUntyped(const char *name, const TClass *type, void *obj);
+   void PutUntyped(const char *path, const TClass *type, void *obj);
 
 public: 
    ///// Factory methods /////
@@ -72,20 +53,20 @@ public:
    // Retrieves an object from the file.
    // If the object is not there, returns an invalid ref.
    template <typename T>
-   std::unique_ptr<T> Get(std::string_view name) const {
-      std::string nameStr(name);
+   std::unique_ptr<T> Get(std::string_view path) const {
+      std::string pathStr(path);
       const TClass *cls = TClass::GetClass(typeid(T));
-      void *obj = GetUntyped(nameStr.c_str(), cls);
+      void *obj = GetUntyped(pathStr.c_str(), cls);
       return std::unique_ptr<T>(static_cast<T *>(obj));
    }
 
    // Puts an object into the file.
    // Throws a RException if the file was opened in read-only mode.
    template <typename T>
-   void Put(std::string_view name, T &obj) {
-      std::string nameStr(name);
+   void Put(std::string_view path, T &obj) {
+      std::string pathStr(path);
       const TClass *cls = TClass::GetClass(typeid(T));
-      PutUntyped(nameStr.c_str(), cls, &obj);
+      PutUntyped(pathStr.c_str(), cls, &obj);
    }
 };
    

@@ -107,3 +107,22 @@ TEST(RFile, WrongExtension)
    FileRaii fileGuard("test_rfile_wrong.xml");
    EXPECT_THROW(RFile::Recreate(fileGuard.GetPath()), ROOT::RException);
 }
+
+TEST(RFile, WriteReadInDir)
+{
+   FileRaii fileGuard("test_rfile_dir.root");
+
+   auto hist = std::make_unique<TH1D>("hist", "", 100, -10, 10);
+   hist->FillRandom("gaus", 1000);
+
+   {
+      auto file = RFile::Recreate(fileGuard.GetPath());
+      file->Put("a/b/hist", *hist);
+   }
+   fileGuard.PreserveFile();
+
+   {
+      auto file = RFile::OpenForReading(fileGuard.GetPath());
+      EXPECT_TRUE(file->Get<TH1D>("a/b/hist"));
+   }
+}

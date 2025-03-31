@@ -19,6 +19,7 @@
 #include <TTree.h>
 #include <TGraph2D.h>
 #include <TH1.h>
+#include <TKey.h>
 
 using ROOT::Experimental::RFile;
 // using ROOT::Experimental::RFileRef;
@@ -59,19 +60,26 @@ std::unique_ptr<RFile> RFile::Recreate(std::string_view path)
    return rfile;
 }
 
-void *RFile::GetUntyped(const char *name, const TClass *type) const
+void *RFile::GetUntyped(const char *path, const TClass *type) const
 {
    if (!type) {
-      throw ROOT::RException(R__FAIL(std::string("Could not determine type of object ") + name));
+      throw ROOT::RException(R__FAIL(std::string("Could not determine type of object ") + path));
    }
-   void *obj = fFile->GetObjectChecked(name, type);
+
+   // NOTE: TFile::GetObjectChecked() and similar will fail if the object's name contains slashes.
+   TKey *key = fFile->FindKey(path);
+   if (!key) {
+      return key;
+   }
+   void *obj = key->ReadObjectAny(type);
 
    if (obj) {
       // Disavow any ownership on `obj`
-      if (type->InheritsFrom("TH1"))
-         static_cast<TH1 *>(obj)->SetDirectory(nullptr);
-      else if (type->InheritsFrom("TTree"))
+      // NOTE: all these objects inherit from TObject as their first parent, so we can use static_cast.
+      if (type->InheritsFrom("TTree"))
          static_cast<TTree *>(obj)->SetDirectory(nullptr);
+      else if (type->InheritsFrom("TH1"))
+         static_cast<TH1 *>(obj)->SetDirectory(nullptr);
       else if (type->InheritsFrom("TGraph2D"))
          static_cast<TGraph2D *>(obj)->SetDirectory(nullptr);
    }
@@ -79,18 +87,18 @@ void *RFile::GetUntyped(const char *name, const TClass *type) const
    return obj;
 }
 
-void RFile::PutUntyped(const char *name, const TClass *type, void *obj)
+void RFile::PutUntyped(const char *path, const TClass *type, void *obj)
 {
    if (!type) {
-      throw ROOT::RException(R__FAIL(std::string("Could not determine type of object ") + name));
+      throw ROOT::RException(R__FAIL(std::string("Could not determine type of object ") + path));
    }
    if (!fFile->IsWritable()) {
       throw ROOT::RException(R__FAIL("File is not writable"));
    }
 
-   int success = fFile->WriteObjectAny(obj, type, name);
+   int success = fFile->WriteObjectAny(obj, type, path);
 
    if (!success) {
-      throw ROOT::RException(R__FAIL(std::string("Failed to write ") + name + " to file"));
+      throw ROOT::RException(R__FAIL(std::string("Failed to write ") + path + " to file"));
    }
 }
