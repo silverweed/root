@@ -93,6 +93,7 @@ DEPENDENCIES
   Imt
   RIO
   ROOTVecOps
+  ROOTFile
 )
 
 target_link_libraries(ROOTNTuple PRIVATE xxHash::xxHash)
