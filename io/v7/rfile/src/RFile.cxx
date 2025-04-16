@@ -452,10 +452,19 @@ void RFile::Close()
    fFile.reset();
 }
 
-std::optional<ROOT::Experimental::RFileKeyInfo> RFile::GetKey(std::string_view path) const
+std::optional<ROOT::Experimental::RFileKeyInfo> RFile::GetKeyInfo(std::string_view path) const
 {
    TKey *key = GetTKey(std::string(path).c_str());
    if (key)
       return RFileKeyInfoFromTKey(*key);
    return {};
+}
+
+void *ROOT::Experimental::Internal::GetRFileObjectFromKey(RFile &file, const RFileKeyInfo &key)
+{
+   const auto *cls = TClass::GetClass(key.fClassName.c_str());
+   void *obj = nullptr;
+   if (cls)
+      obj = file.GetUntyped(key.fName.c_str(), cls);
+   return obj;
 }

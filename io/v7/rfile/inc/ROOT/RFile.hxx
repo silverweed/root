@@ -26,10 +26,13 @@ namespace ROOT {
 namespace Experimental {
 
 class RFile;
+struct RFileKeyInfo;
 
 namespace Internal {
 
 TFile *GetRFileTFile(RFile &file);
+/// Returns an **owning** pointer to the object referenced by `key`. The caller must delete this pointer.
+[[nodiscard]] void *GetRFileObjectFromKey(RFile &file, const RFileKeyInfo &key);
 
 }
 
@@ -115,6 +118,7 @@ public:
 
 class RFile final {
    friend TFile *Internal::GetRFileTFile(RFile &file);
+   friend void *Internal::GetRFileObjectFromKey(RFile &file, const RFileKeyInfo &key);
 
    enum PutFlags {
       kPutAllowOverwrite = 0x1,
@@ -125,7 +129,7 @@ class RFile final {
 
    explicit RFile(std::unique_ptr<TFile> file) : fFile(std::move(file)) {}
 
-   // NOTE: these strings are const char * because they need to be passed to TFile
+   // NOTE: these strings are const char * because they need to be passed to TFile.
    /// Gets object `path` from the file and returns an **owning** pointer to it.
    /// The caller should immediately wrap it into a unique_ptr of the type described by `type`.
    [[nodiscard]] void *GetUntyped(const char *path, const TClass *type) const;
@@ -250,8 +254,10 @@ public:
       return RFileKeyIterable(fFile.get(), rootDir, /* recursive = */ false);
    }
 
-   std::optional<RFileKeyInfo> GetKey(std::string_view path) const;
+   /// Retrieves information about the key `path`.
+   std::optional<RFileKeyInfo> GetKeyInfo(std::string_view path) const;
 
+   /// Prints the internal structure of this RFile to the given stream.
    void Print(std::ostream &out = std::cout) const;
 };
 
