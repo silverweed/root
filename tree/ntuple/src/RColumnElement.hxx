@@ -1027,6 +1027,7 @@ int QuantizeReals(Quantized_t *dst, const T *src, std::size_t count, double min,
    static_assert(std::is_floating_point_v<T>);
    static_assert(sizeof(T) <= sizeof(double));
    assert(1 <= nQuantBits && nQuantBits <= 8 * sizeof(Quantized_t));
+   assert(min <= max);
 
    // `min` and `max` are supposed to be exactly representable by type `T` because we cast them to `T` in
    // SetQuantized().
@@ -1067,6 +1068,7 @@ int UnquantizeReals(T *dst, const Quantized_t *src, std::size_t count, double mi
    static_assert(std::is_floating_point_v<T>);
    static_assert(sizeof(T) <= sizeof(double));
    assert(1 <= nQuantBits && nQuantBits <= 8 * sizeof(Quantized_t));
+   assert(min <= max);
 
    const std::size_t quantMax = (1ull << nQuantBits) - 1;
    const double scale = (max - min) / quantMax;
@@ -1125,6 +1127,7 @@ public:
    {
       R__ASSERT(min >= std::numeric_limits<T>::lowest());
       R__ASSERT(max <= std::numeric_limits<T>::max());
+      R__ASSERT(min <= max);
       // Disallow denormal, NaN and infinity
       R__ASSERT(std::isnormal(min) || min == 0.0);
       R__ASSERT(std::isnormal(max) || max == 0.0);

@@ -1153,6 +1153,17 @@ TEST(Packing, Real32QuantDouble)
       EXPECT_FLOAT_EQ(f2, -5.f);
    }
 
+   {
+      RField<double> field("f");
+      // setting min > max should throw
+      EXPECT_THROW(field.SetQuantized(10.0, 1.0, 20), ROOT::RException);
+   }
+}
+
+TEST(Packing, Real32QuantDoubleExhaustive)
+{
+   namespace BitPacking = ROOT::Internal::BitPacking;
+
    // Exhaustively test, for all valid bit widths, packing and unpacking of 0 to N random doubles.
    constexpr double kMin = -1000, kMax = 1000;
    std::uniform_real_distribution<double> dist(kMin, kMax);

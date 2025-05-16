@@ -454,7 +454,7 @@ public:
    }
 
    /// Sets this field to use a quantized integer representation using `nBits` per value.
-   /// It must be $1 <= nBits <= 32$.
+   /// It must be $1 <= nBits <= 32$ and $minValue <= maxValue$.
    /// `minValue` and `maxValue` must not be infinity, `NaN` or denormal floats.
    /// Calling this function establishes a promise by the caller to RNTuple that this field will only contain values
    /// contained in `[minValue, maxValue]` inclusive. If a value outside this range is assigned to this field, the
@@ -468,6 +468,10 @@ public:
          throw RException(R__FAIL("SetQuantized() argument nBits = " + std::to_string(nBits) +
                                   " is out of valid range [" + std::to_string(minBits) + ", " +
                                   std::to_string(maxBits) + "])"));
+      }
+      if (minValue > maxValue) {
+         throw RException(R__FAIL("Invalid range given to SetQuantized(" + std::to_string(minValue) + ", " +
+                                  std::to_string(maxValue) + "): min > max!"));
       }
       SetColumnRepresentatives({{ROOT::ENTupleColumnType::kReal32Quant}});
       fBitWidth = nBits;
