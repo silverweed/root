@@ -34,7 +34,7 @@ TFile *GetRFileTFile(RFile &file);
 /// Returns an **owning** pointer to the object referenced by `key`. The caller must delete this pointer.
 [[nodiscard]] void *GetRFileObjectFromKey(RFile &file, const RFileKeyInfo &key);
 
-}
+} // namespace Internal
 
 /// Given a "path-like" string (like foo/bar/baz), returns a pair `{ dirName, baseName }`.
 /// `baseName` will be empty if the string ends with '/'.
@@ -47,9 +47,9 @@ TFile *GetRFileTFile(RFile &file);
 std::pair<std::string_view, std::string_view> DecomposePath(std::string_view path);
 
 struct RFileKeyInfo {
-  std::string fName;
-  std::string fTitle;
-  std::string fClassName; 
+   std::string fName;
+   std::string fTitle;
+   std::string fClassName;
 };
 
 class RFileKeyIterable final {
@@ -122,9 +122,9 @@ class RFile final {
 
    enum PutFlags {
       kPutAllowOverwrite = 0x1,
-      kPutOverwriteKeepCycle = 0x2,   
+      kPutOverwriteKeepCycle = 0x2,
    };
-   
+
    std::unique_ptr<TFile> fFile;
 
    explicit RFile(std::unique_ptr<TFile> file) : fFile(std::move(file)) {}
@@ -259,6 +259,57 @@ public:
 
    /// Prints the internal structure of this RFile to the given stream.
    void Print(std::ostream &out = std::cout) const;
+};
+
+class RDirectory {
+   std::unique_ptr<RFile> fFile;
+   std::string fRootDir;
+
+   std::string FullPath(std::string_view basePath) const {
+      return fRootDir + "/" + std::string(basePath); 
+   }
+   
+public:
+   explicit RDirectory(std::unique_ptr<RFile> file, std::string_view rootDir = "")
+      : fFile(std::move(file))
+   {
+      // Strip trailing '/'
+      int stripLen = (!rootDir.empty() && rootDir[rootDir.length() - 1] == '/') ? 1 : 0;
+      fRootDir = std::string(rootDir, 0, rootDir.length() - stripLen);
+   }
+
+   /// \see RFile::Get
+   template <typename T>
+   std::unique_ptr<T> Get(std::string_view path) const
+   {
+      return fFile->Get<T>(FullPath(path));
+   }
+
+   /// \see RFile::Put
+   template <typename T>
+   void Put(std::string_view path, const T &obj)
+   {
+      fFile->Put<T>(FullPath(path), obj);
+   }
+
+   /// \see RFile::Overwrite
+   template <typename T>
+   void Overwrite(std::string_view path, const T &obj, bool backupPrevious = true)
+   {
+      fFile->Overwrite(FullPath(path), obj, backupPrevious);
+   }
+
+   /// \see RFile::GetKeys
+   RFileKeyIterable GetKeys(std::string_view rootDir = "") const
+   {
+      return fFile->GetKeys(FullPath(rootDir));
+   }
+
+   /// \see RFile::GetKeysNonRecursive
+   RFileKeyIterable GetKeysNonRecursive(std::string_view rootDir = "") const
+   {
+      return fFile->GetKeysNonRecursive(FullPath(rootDir));
+   }
 };
 
 } // namespace Experimental
