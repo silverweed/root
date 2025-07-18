@@ -18,6 +18,7 @@
 #include <ROOT/RNTuple.hxx>
 #include <ROOT/RNTupleSerialize.hxx>
 #include <ROOT/RSpan.hxx>
+#include <ROOT/RFile.hxx>
 #include <Compression.h>
 #include <string_view>
 
@@ -37,12 +38,6 @@ class RRawFile;
 }
 
 class RNTupleWriteOptions;
-
-namespace Experimental {
-
-class RFile;
-
-}
 
 namespace Internal {
 /// Holds status information of an open ROOT file during writing
@@ -132,16 +127,17 @@ private:
 
 #ifdef R__HAS_ROOT7
    struct RFileRFile {
+      RFileRFile(ROOT::Experimental::RDirectory dir) : fDir(dir) {}
+
       /// A sub directory in fFile or nullptr if the data is stored in the root directory of the file
-      ROOT::Experimental::RFile *fFile = nullptr;
-      std::string fDir;
+      ROOT::Experimental::RDirectory fDir;
       /// Low-level writing using a TFile
       void Write(const void *buffer, size_t nbytes, std::int64_t offset);
       /// Reserves an RBlob opaque key as data record and returns the offset of the record. If keyBuffer is specified,
       /// it must be written *before* the returned offset. (Note that the array type is purely documentation, the
       /// argument is actually just a pointer.)
       std::uint64_t ReserveBlobKey(size_t nbytes, size_t len, unsigned char keyBuffer[kBlobKeyLen] = nullptr);
-      operator bool() const { return fFile; }
+      // operator bool() const { return fFile; }
    };
 #endif
 
@@ -250,8 +246,10 @@ public:
    static std::unique_ptr<RNTupleFileWriter>
    Append(std::string_view ntupleName, TDirectory &fileOrDirectory, std::uint64_t maxKeySize);
 
-   static std::unique_ptr<RNTupleFileWriter> Append(std::string_view ntupleName, ROOT::Experimental::RFile &file,
-                                                    std::string_view dirPath, std::uint64_t maxKeySize);
+#ifdef R__HAS_ROOT7
+   static std::unique_ptr<RNTupleFileWriter>
+   Append(std::string_view ntupleName, const ROOT::Experimental::RDirectory &dir, std::uint64_t maxKeySize);
+#endif
 
    RNTupleFileWriter(const RNTupleFileWriter &other) = delete;
    RNTupleFileWriter(RNTupleFileWriter &&other) = delete;

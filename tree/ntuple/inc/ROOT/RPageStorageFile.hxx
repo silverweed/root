@@ -36,7 +36,7 @@ class RNTuple; // for making RPageSourceFile a friend of RNTuple
 class RNTupleLocator;
 
 namespace Experimental {
-class RFile;
+class RDirectory;
 }
 
 namespace Internal {
@@ -98,7 +98,7 @@ public:
    RPageSinkFile(std::string_view ntupleName, std::string_view path, const ROOT::RNTupleWriteOptions &options);
    RPageSinkFile(std::string_view ntupleName, TDirectory &fileOrDirectory, const ROOT::RNTupleWriteOptions &options);
 #ifdef R__HAS_ROOT7
-   RPageSinkFile(std::string_view ntupleName, ROOT::Experimental::RFile &file, std::string_view ntupleDir,
+   RPageSinkFile(std::string_view ntupleName, const ROOT::Experimental::RDirectory &dir,
                  const ROOT::RNTupleWriteOptions &options);
 #endif
    RPageSinkFile(const RPageSinkFile &) = delete;

@@ -76,11 +76,11 @@ ROOT::Internal::RPageSinkFile::RPageSinkFile(std::string_view ntupleName, TDirec
 }
 
 #ifdef R__HAS_ROOT7
-ROOT::Internal::RPageSinkFile::RPageSinkFile(std::string_view ntupleName, ROOT::Experimental::RFile &file,
-                                             std::string_view ntupleDir, const ROOT::RNTupleWriteOptions &options)
+ROOT::Internal::RPageSinkFile::RPageSinkFile(std::string_view ntupleName, const ROOT::Experimental::RDirectory &dir,
+                                             const ROOT::RNTupleWriteOptions &options)
    : RPageSinkFile(ntupleName, options)
 {
-   fWriter = RNTupleFileWriter::Append(ntupleName, file, ntupleDir, options.GetMaxKeySize());
+   fWriter = RNTupleFileWriter::Append(ntupleName, dir, options.GetMaxKeySize());
 }
 #endif
 

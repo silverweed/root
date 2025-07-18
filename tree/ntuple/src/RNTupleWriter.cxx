@@ -120,10 +120,9 @@ ROOT::RNTupleWriter::Append(std::unique_ptr<ROOT::RNTupleModel> model, std::stri
 #ifdef R__HAS_ROOT7
 std::unique_ptr<ROOT::RNTupleWriter>
 ROOT::RNTupleWriter::Append(std::unique_ptr<ROOT::RNTupleModel> model, std::string_view ntupleName,
-                            ROOT::Experimental::RFile &file, const ROOT::RNTupleWriteOptions &options)
+                            const ROOT::Experimental::RDirectory &dir, const ROOT::RNTupleWriteOptions &options)
 {
-   auto [ntupleDir, ntupleBasename] = ROOT::Experimental::DecomposePath(ntupleName);
-   auto sink = std::make_unique<Internal::RPageSinkFile>(ntupleBasename, file, ntupleDir, options);
+   auto sink = std::make_unique<Internal::RPageSinkFile>(ntupleName, dir, options);
    return Create(std::move(model), std::move(sink), options);
 }
 #endif

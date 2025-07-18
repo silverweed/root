@@ -38,7 +38,7 @@ namespace ROOT {
 class RNTupleWriteOptions;
 
 namespace Experimental {
-class RFile;
+class RDirectory;
 }
 
 namespace Internal {
@@ -160,7 +160,7 @@ public:
    /// `ntuplePath` may have the form `"path/to/ntuple"`, in which case the ntuple's name will be `"ntuple"` and it will
    /// be stored under the given `ntuplePath` in the RFile.
    static std::unique_ptr<RNTupleWriter> Append(std::unique_ptr<ROOT::RNTupleModel> model, std::string_view ntuplePath,
-                                                ROOT::Experimental::RFile &file,
+                                                const ROOT::Experimental::RDirectory &file,
                                                 const ROOT::RNTupleWriteOptions &options = ROOT::RNTupleWriteOptions());
 #endif
 

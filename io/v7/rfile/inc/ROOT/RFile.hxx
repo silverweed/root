@@ -117,6 +117,7 @@ public:
 };
 
 class RFile final {
+   friend class RDirectory;
    friend TFile *Internal::GetRFileTFile(RFile &file);
    friend void *Internal::GetRFileObjectFromKey(RFile &file, const RFileKeyInfo &key);
 
@@ -180,8 +181,14 @@ public:
    /// passing an invalid path to Get will always return nullptr.
    static bool IsValidPath(std::string_view path);
 
-   ///// Instance methods /////
+   /// Writes all objects to disk with the file structure.
+   /// Returns the number of bytes written.
+   size_t Write();
 
+   /// Closes the RFile, disallowing any further reading or writing.
+   void Close();
+
+private:
    /// Retrieves an object from the file.
    /// If the object is not there returns a null pointer.
    template <typename T>
@@ -227,13 +234,6 @@ public:
       PutInternal(path, obj, flags);
    }
 
-   /// Writes all objects to disk with the file structure.
-   /// Returns the number of bytes written.
-   size_t Write();
-
-   /// Closes the RFile, disallowing any further reading or writing.
-   void Close();
-
    /// Returns an iterable over all paths of objects written into this RFile starting at directory "rootDir".
    /// The returned paths are always "absolute" paths: they are not relative to `rootDir`.
    /// Keys relative to directories are not returned.
@@ -262,53 +262,58 @@ public:
 };
 
 class RDirectory {
-   std::unique_ptr<RFile> fFile;
+   RFile &fFile;
    std::string fRootDir;
 
    std::string FullPath(std::string_view basePath) const {
-      return fRootDir + "/" + std::string(basePath); 
+      return fRootDir + (fRootDir.empty() ? "" : "/") + std::string(basePath); 
    }
    
 public:
-   explicit RDirectory(std::unique_ptr<RFile> file, std::string_view rootDir = "")
-      : fFile(std::move(file))
+   explicit RDirectory(RFile &file, std::string_view rootDir = "") : fFile(file)
    {
       // Strip trailing '/'
       int stripLen = (!rootDir.empty() && rootDir[rootDir.length() - 1] == '/') ? 1 : 0;
       fRootDir = std::string(rootDir, 0, rootDir.length() - stripLen);
    }
 
+   const std::string &GetRootPath() const { return fRootDir; }
+   RFile &GetFile() { return fFile; }
+
+   RDirectory MakeSubdir(std::string_view subPath) const
+   {
+      RDirectory dir(fFile, FullPath(subPath));
+      return dir;
+   }
+
    /// \see RFile::Get
    template <typename T>
    std::unique_ptr<T> Get(std::string_view path) const
    {
-      return fFile->Get<T>(FullPath(path));
+      return fFile.Get<T>(FullPath(path));
    }
 
    /// \see RFile::Put
    template <typename T>
    void Put(std::string_view path, const T &obj)
    {
-      fFile->Put<T>(FullPath(path), obj);
+      fFile.Put<T>(FullPath(path), obj);
    }
 
    /// \see RFile::Overwrite
    template <typename T>
    void Overwrite(std::string_view path, const T &obj, bool backupPrevious = true)
    {
-      fFile->Overwrite(FullPath(path), obj, backupPrevious);
+      fFile.Overwrite(FullPath(path), obj, backupPrevious);
    }
 
    /// \see RFile::GetKeys
-   RFileKeyIterable GetKeys(std::string_view rootDir = "") const
-   {
-      return fFile->GetKeys(FullPath(rootDir));
-   }
+   RFileKeyIterable GetKeys(std::string_view rootDir = "") const { return fFile.GetKeys(FullPath(rootDir)); }
 
    /// \see RFile::GetKeysNonRecursive
    RFileKeyIterable GetKeysNonRecursive(std::string_view rootDir = "") const
    {
-      return fFile->GetKeysNonRecursive(FullPath(rootDir));
+      return fFile.GetKeysNonRecursive(FullPath(rootDir));
    }
 };
 

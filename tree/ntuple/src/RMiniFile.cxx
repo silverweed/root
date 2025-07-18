@@ -1132,7 +1132,7 @@ std::uint64_t ROOT::Internal::RNTupleFileWriter::RFileProper::ReserveBlobKey(siz
 #ifdef R__HAS_ROOT7
 void ROOT::Internal::RNTupleFileWriter::RFileRFile::Write(const void *buffer, size_t nbytes, std::int64_t offset)
 {
-   auto *file = ROOT::Experimental::Internal::GetRFileTFile(*fFile);
+   auto *file = ROOT::Experimental::Internal::GetRFileTFile(fDir.GetFile());
    file->Seek(offset);
    bool rv = file->WriteBuffer((char *)(buffer), nbytes);
    if (rv)
@@ -1143,7 +1143,7 @@ std::uint64_t ROOT::Internal::RNTupleFileWriter::RFileRFile::ReserveBlobKey(size
                                                                             unsigned char keyBuffer[kBlobKeyLen])
 {
    std::uint64_t offsetKey;
-   auto *file = ROOT::Experimental::Internal::GetRFileTFile(*fFile);
+   auto *file = ROOT::Experimental::Internal::GetRFileTFile(fDir.GetFile());
    RKeyBlob keyBlob(file);
    // Since it is unknown beforehand if offsetKey is beyond the 2GB limit or not,
    // RKeyBlob will always reserve space for a big key (version >= 1000)
@@ -1257,14 +1257,11 @@ ROOT::Internal::RNTupleFileWriter::Append(std::string_view ntupleName, TDirector
 
 #ifdef R__HAS_ROOT7
 std::unique_ptr<ROOT::Internal::RNTupleFileWriter>
-ROOT::Internal::RNTupleFileWriter::Append(std::string_view ntupleName, ROOT::Experimental::RFile &file,
-                                          std::string_view ntupleDir, std::uint64_t maxKeySize)
+ROOT::Internal::RNTupleFileWriter::Append(std::string_view ntupleName, const ROOT::Experimental::RDirectory &dir,
+                                          std::uint64_t maxKeySize)
 {
    auto writer = std::unique_ptr<RNTupleFileWriter>(new RNTupleFileWriter(ntupleName, maxKeySize));
-   auto &rfile = writer->fFile.emplace<RFileRFile>();
-   rfile.fFile = &file;
-   R__ASSERT(ntupleDir.empty() || ntupleDir[ntupleDir.size() - 1] == '/');
-   rfile.fDir = ntupleDir;
+   writer->fFile.emplace<RFileRFile>(dir);
    return writer;
 }
 #endif
@@ -1302,15 +1299,15 @@ void ROOT::Internal::RNTupleFileWriter::Commit(int compression)
 #ifdef R__HAS_ROOT7
    } else if (auto fileRFile = std::get_if<RFileRFile>(&fFile)) {
       // Easy case, the ROOT file header and the RNTuple streaming is taken care of by TFile
-      fileRFile->fFile->Put(fileRFile->fDir + fNTupleName, fNTupleAnchor);
+      fileRFile->fDir.Put(fNTupleName, fNTupleAnchor);
 
       // Make sure the streamer info records used in the RNTuple are written to the file
       TBufferFile buf(TBuffer::kWrite);
-      buf.SetParent(ROOT::Experimental::Internal::GetRFileTFile(*fileRFile->fFile));
+      buf.SetParent(ROOT::Experimental::Internal::GetRFileTFile(fileRFile->fDir.GetFile()));
       for (auto [_, info] : fStreamerInfoMap)
          buf.TagStreamerInfo(info);
 
-      fileRFile->fFile->Write();
+      fileRFile->fDir.GetFile().Write();
       return;
 #endif
    }

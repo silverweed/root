@@ -75,18 +75,19 @@ TEST(RFile, OpenForReading)
    }
 
    auto file = RFile::OpenForReading(fileGuard.GetPath());
-   auto hist = file->Get<TH1D>("hist");
+   ROOT::Experimental::RDirectory dir(*file);
+   auto hist = dir.Get<TH1D>("hist");
    EXPECT_TRUE(hist);
 
-   EXPECT_FALSE(file->Get<TH1D>("inexistent"));
-   EXPECT_FALSE(file->Get<TH1F>("hist"));
-   EXPECT_TRUE(file->Get<TH1>("hist"));
+   EXPECT_FALSE(dir.Get<TH1D>("inexistent"));
+   EXPECT_FALSE(dir.Get<TH1F>("hist"));
+   EXPECT_TRUE(dir.Get<TH1>("hist"));
 
    // We do NOT want to globally register RFiles ever.
    EXPECT_EQ(ROOT::GetROOT()->GetListOfFiles()->GetSize(), 0);
 
    std::string foo = "foo";
-   EXPECT_THROW(file->Put("foo", foo), ROOT::RException);
+   EXPECT_THROW(dir.Put("foo", foo), ROOT::RException);
 }
 
 TEST(RFile, OpenForWriting)
@@ -97,8 +98,9 @@ TEST(RFile, OpenForWriting)
    hist->FillRandom("gaus", 1000);
 
    auto file = RFile::Recreate(fileGuard.GetPath());
-   file->Put("hist", *hist);
-   EXPECT_TRUE(file->Get<TH1D>("hist"));
+   ROOT::Experimental::RDirectory dir(*file);
+   dir.Put("hist", *hist);
+   EXPECT_TRUE(dir.Get<TH1D>("hist"));
 
    EXPECT_EQ(ROOT::GetROOT()->GetListOfFiles()->GetSize(), 0);
 }
@@ -108,15 +110,16 @@ TEST(RFile, WriteInvalidPaths)
    FileRaii fileGuard("test_rfile_write_invalid.root");
 
    auto file = RFile::Recreate(fileGuard.GetPath());
+   ROOT::Experimental::RDirectory dir(*file);
    std::string a;
-   EXPECT_THROW(file->Put("", a), ROOT::RException);
-   EXPECT_THROW(file->Put("..", a), ROOT::RException);
-   EXPECT_THROW(file->Put(" a", a), ROOT::RException);
-   EXPECT_THROW(file->Put("a\n", a), ROOT::RException);
-   EXPECT_THROW(file->Put(".", a), ROOT::RException);
-   EXPECT_THROW(file->Put("\0", a), ROOT::RException);
-   EXPECT_NO_THROW(file->Put(".a", a));
-   EXPECT_NO_THROW(file->Put("a..", a));
+   EXPECT_THROW(dir.Put("", a), ROOT::RException);
+   EXPECT_THROW(dir.Put("..", a), ROOT::RException);
+   EXPECT_THROW(dir.Put(" a", a), ROOT::RException);
+   EXPECT_THROW(dir.Put("a\n", a), ROOT::RException);
+   EXPECT_THROW(dir.Put(".", a), ROOT::RException);
+   EXPECT_THROW(dir.Put("\0", a), ROOT::RException);
+   EXPECT_NO_THROW(dir.Put(".a", a));
+   EXPECT_NO_THROW(dir.Put("a..", a));
 }
 
 TEST(RFile, OpenForUpdating)
@@ -127,16 +130,18 @@ TEST(RFile, OpenForUpdating)
       TH1D hist("hist", "", 100, -10, 10);
       hist.FillRandom("gaus", 1000);
       auto file = RFile::Recreate(fileGuard.GetPath());
-      file->Put("hist", hist);
+      ROOT::Experimental::RDirectory dir(*file);
+      dir.Put("hist", hist);
    }
 
    auto file = RFile::OpenForUpdate(fileGuard.GetPath());
-   EXPECT_TRUE(file->Get<TH1D>("hist"));
+   ROOT::Experimental::RDirectory dir(*file);
+   EXPECT_TRUE(dir.Get<TH1D>("hist"));
    {
       auto hist2 = std::make_unique<TH1D>("hist2", "a different hist", 10, -1, 1);
-      file->Put("hist2", *hist2);
+      dir.Put("hist2", *hist2);
    }
-   EXPECT_TRUE(file->Get<TH1D>("hist2"));
+   EXPECT_TRUE(dir.Get<TH1D>("hist2"));
 
    EXPECT_EQ(ROOT::GetROOT()->GetListOfFiles()->GetSize(), 0);
 }
@@ -146,15 +151,16 @@ TEST(RFile, PutOverwrite)
    FileRaii fileGuard("test_rfile_putoverwrite.root");
 
    auto file = RFile::Recreate(fileGuard.GetPath());
+   ROOT::Experimental::RDirectory dir(*file);
 
    {
       TH1D hist("hist", "", 100, -10, 10);
       hist.FillRandom("gaus", 1000);
-      file->Put("hist", hist);
+      dir.Put("hist", hist);
    }
 
    {
-      auto hist = file->Get<TH1D>("hist");
+      auto hist = dir.Get<TH1D>("hist");
       ASSERT_TRUE(hist);
       EXPECT_EQ(static_cast<int>(hist->GetEntries()), 1000);
    }
@@ -162,29 +168,29 @@ TEST(RFile, PutOverwrite)
    // Try putting another object at the same path, should fail
    TH1D hist2("hist2", "a different hist", 10, -1, 1);
    hist2.FillRandom("gaus", 10);
-   EXPECT_THROW(file->Put("hist", hist2), ROOT::RException);
+   EXPECT_THROW(dir.Put("hist", hist2), ROOT::RException);
 
    // Try with Overwrite, should work (and preserve the old object)
-   file->Overwrite("hist", hist2);
+   dir.Overwrite("hist", hist2);
    {
-      auto hist = file->Get<TH1D>("hist");
+      auto hist = dir.Get<TH1D>("hist");
       ASSERT_TRUE(hist);
       EXPECT_EQ(static_cast<int>(hist->GetEntries()), 10);
 
-      hist = file->Get<TH1D>("hist;1");
+      hist = dir.Get<TH1D>("hist;1");
       ASSERT_TRUE(hist);
       EXPECT_EQ(static_cast<int>(hist->GetEntries()), 1000);
    }
 
    // Now try overwriting without preserving the existing object
    std::string s;
-   file->Overwrite("hist", s, false);
+   dir.Overwrite("hist", s, false);
    {
       // the previous cycle should be gone...
-      auto hist = file->Get<TH1D>("hist;2");
+      auto hist = dir.Get<TH1D>("hist;2");
       EXPECT_EQ(hist, nullptr);
       // ...but any cycle before the latest should still be there!
-      hist = file->Get<TH1D>("hist;1");
+      hist = dir.Get<TH1D>("hist;1");
       EXPECT_NE(hist, nullptr);
    }
 }
@@ -203,12 +209,14 @@ TEST(RFile, WriteReadInDir)
       auto hist = std::make_unique<TH1D>("hist", "", 100, -10, 10);
       hist->FillRandom("gaus", 1000);
       auto file = RFile::Recreate(fileGuard.GetPath());
-      file->Put("a/b/hist", *hist);
+      ROOT::Experimental::RDirectory dir(*file);
+      dir.Put("a/b/hist", *hist);
    }
 
    {
       auto file = RFile::OpenForReading(fileGuard.GetPath());
-      EXPECT_TRUE(file->Get<TH1D>("a/b/hist"));
+      ROOT::Experimental::RDirectory dir(*file);
+      EXPECT_TRUE(dir.Get<TH1D>("a/b/hist"));
    }
 }
 
@@ -227,8 +235,9 @@ TEST(RFile, WriteReadInTFileDir)
 
    {
       auto file = RFile::OpenForReading(fileGuard.GetPath());
-      EXPECT_TRUE(file->Get<TH1D>("a/b/hist"));
-      EXPECT_TRUE(file->Get<TH1D>("a/b/c/d"));
+      ROOT::Experimental::RDirectory dir(*file);
+      EXPECT_TRUE(dir.Get<TH1D>("a/b/hist"));
+      EXPECT_TRUE(dir.Get<TH1D>("a/b/c/d"));
    }
 }
 
@@ -238,19 +247,21 @@ TEST(RFile, IterateKeys)
 
    {
       auto file = RFile::Recreate(fileGuard.GetPath());
+      ROOT::Experimental::RDirectory dir(*file);
       TH1D a;
       auto b = std::make_unique<TTree>();
       std::string c = "0";
-      file->Put("a", a);
-      file->Put("b", *b);
-      file->Put("c", c);
+      dir.Put("a", a);
+      dir.Put("b", *b);
+      dir.Put("c", c);
    }
 
    {
       auto file = RFile::OpenForReading(fileGuard.GetPath());
+      ROOT::Experimental::RDirectory dir(*file);
       const auto expected = "a,b,c,";
       std::string s = "";
-      for (const auto &key : file->GetKeys()) {
+      for (const auto &key : dir.GetKeys()) {
          s += key.fName + ",";
       }
       EXPECT_EQ(expected, s);
@@ -258,7 +269,7 @@ TEST(RFile, IterateKeys)
       // verify the expected iterator operations work
       const auto expected2 = "b,c,";
       s = "";
-      auto iterable = file->GetKeys();
+      auto iterable = dir.GetKeys();
       auto it = iterable.begin();
       std::advance(it, 1);
       for (; it != iterable.end(); ++it) {
@@ -286,20 +297,21 @@ TEST(RFile, SaneHierarchy)
 
    {
       auto file = RFile::Recreate(fileGuard.GetPath());
+      ROOT::Experimental::RDirectory dir(*file);
       std::string s;
-      file->Put("a", s);
-      EXPECT_THROW(file->Put("a/b", s), ROOT::RException);
-      file->Put("b/c", s);
-      file->Put("b/d", s);
-      EXPECT_THROW(file->Put("b/c/d", s), ROOT::RException);
-      EXPECT_THROW(file->Put("b", s), ROOT::RException);
+      dir.Put("a", s);
+      EXPECT_THROW(dir.Put("a/b", s), ROOT::RException);
+      dir.Put("b/c", s);
+      dir.Put("b/d", s);
+      EXPECT_THROW(dir.Put("b/c/d", s), ROOT::RException);
+      EXPECT_THROW(dir.Put("b", s), ROOT::RException);
 
-      EXPECT_NE(file->Get<std::string>("a"), nullptr);
-      EXPECT_EQ(file->Get<std::string>("a/b"), nullptr);
-      EXPECT_NE(file->Get<std::string>("b/c"), nullptr);
-      EXPECT_NE(file->Get<std::string>("b/d"), nullptr);
-      EXPECT_EQ(file->Get<std::string>("b/c/d"), nullptr);
-      EXPECT_EQ(file->Get<std::string>("b"), nullptr);
+      EXPECT_NE(dir.Get<std::string>("a"), nullptr);
+      EXPECT_EQ(dir.Get<std::string>("a/b"), nullptr);
+      EXPECT_NE(dir.Get<std::string>("b/c"), nullptr);
+      EXPECT_NE(dir.Get<std::string>("b/d"), nullptr);
+      EXPECT_EQ(dir.Get<std::string>("b/c/d"), nullptr);
+      EXPECT_EQ(dir.Get<std::string>("b"), nullptr);
    }
 }
 
@@ -309,11 +321,12 @@ TEST(RFile, IterateKeysRecursive)
 
    {
       auto file = RFile::Recreate(fileGuard.GetPath());
+      ROOT::Experimental::RDirectory dir(*file);
       std::string s;
-      file->Put("a/c", s);
-      file->Put("a/b/d", s);
-      file->Put("e/f", s);
-      file->Put("e/c/g", s);
+      dir.Put("a/c", s);
+      dir.Put("a/b/d", s);
+      dir.Put("e/f", s);
+      dir.Put("e/c/g", s);
    }
 
    const auto JoinKeyNames = [](const auto &iterable) {
@@ -326,11 +339,12 @@ TEST(RFile, IterateKeysRecursive)
 
    {
       auto file = RFile::OpenForReading(fileGuard.GetPath());
-      EXPECT_EQ(JoinKeyNames(file->GetKeys()), "a/c, a/b/d, e/f, e/c/g");
-      EXPECT_EQ(JoinKeyNames(file->GetKeys("a")), "a/c, a/b/d");
-      EXPECT_EQ(JoinKeyNames(file->GetKeys("a/b")), "a/b/d");
-      EXPECT_EQ(JoinKeyNames(file->GetKeys("a/b/c")), "");
-      EXPECT_EQ(JoinKeyNames(file->GetKeys("e/c")), "e/c/g");
+      ROOT::Experimental::RDirectory dir(*file);
+      EXPECT_EQ(JoinKeyNames(dir.GetKeys()), "a/c, a/b/d, e/f, e/c/g");
+      EXPECT_EQ(JoinKeyNames(dir.GetKeys("a")), "a/c, a/b/d");
+      EXPECT_EQ(JoinKeyNames(dir.GetKeys("a/b")), "a/b/d");
+      EXPECT_EQ(JoinKeyNames(dir.GetKeys("a/b/c")), "");
+      EXPECT_EQ(JoinKeyNames(dir.GetKeys("e/c")), "e/c/g");
    }
 }
 
@@ -340,12 +354,13 @@ TEST(RFile, IterateKeysNonRecursive)
 
    {
       auto file = RFile::Recreate(fileGuard.GetPath());
+      ROOT::Experimental::RDirectory dir(*file);
       std::string s;
-      file->Put("h", s);
-      file->Put("a/c", s);
-      file->Put("a/b/d", s);
-      file->Put("e/f", s);
-      file->Put("e/c/g", s);
+      dir.Put("h", s);
+      dir.Put("a/c", s);
+      dir.Put("a/b/d", s);
+      dir.Put("e/f", s);
+      dir.Put("e/c/g", s);
    }
 
    const auto JoinKeyNames = [](const auto &iterable) {
@@ -358,11 +373,12 @@ TEST(RFile, IterateKeysNonRecursive)
 
    {
       auto file = RFile::OpenForReading(fileGuard.GetPath());
-      EXPECT_EQ(JoinKeyNames(file->GetKeysNonRecursive()), "h");
-      EXPECT_EQ(JoinKeyNames(file->GetKeysNonRecursive("a")), "a/c");
-      EXPECT_EQ(JoinKeyNames(file->GetKeysNonRecursive("a/b")), "a/b/d");
-      EXPECT_EQ(JoinKeyNames(file->GetKeysNonRecursive("a/b/c")), "");
-      EXPECT_EQ(JoinKeyNames(file->GetKeysNonRecursive("e")), "e/f");
+      ROOT::Experimental::RDirectory dir(*file);
+      EXPECT_EQ(JoinKeyNames(dir.GetKeysNonRecursive()), "h");
+      EXPECT_EQ(JoinKeyNames(dir.GetKeysNonRecursive("a")), "a/c");
+      EXPECT_EQ(JoinKeyNames(dir.GetKeysNonRecursive("a/b")), "a/b/d");
+      EXPECT_EQ(JoinKeyNames(dir.GetKeysNonRecursive("a/b/c")), "");
+      EXPECT_EQ(JoinKeyNames(dir.GetKeysNonRecursive("e")), "e/f");
    }
 }
 
@@ -372,7 +388,8 @@ TEST(RFile, RemoteRead)
    constexpr const char *kFileName = "http://root.cern/files/RNTuple.root";
 
    auto file = RFile::OpenForReading(kFileName);
-   auto ntuple = file->Get<ROOT::RNTuple>("Contributors");
+   ROOT::Experimental::RDirectory dir(*file);
+   auto ntuple = dir.Get<ROOT::RNTuple>("Contributors");
    ASSERT_NE(ntuple, nullptr);
 }
 #endif
@@ -389,18 +406,17 @@ TEST(RFile, ComplexExample)
 
    using namespace std::chrono; // TEMP
    const std::string topLevelDirs[] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"};
-   for (const auto &dir : topLevelDirs) {
+   for (const auto &dirName : topLevelDirs) {
       const auto kNRuns = 10;
       for (int runIdx = 0; runIdx < kNRuns; ++runIdx) {
-         const auto runDir = dir + "/run" + (runIdx + 1);
-
+         ROOT::Experimental::RDirectory runDir(*file, dirName + "/run" + (runIdx + 1));
          const auto kNHist = 10;
          for (int i = 0; i < kNHist; ++i) {
             const auto histName = std::string("h") + (i + 1);
-            const auto histPath = runDir + "/hists/" + histName;
+            auto histDir = runDir.MakeSubdir("hists");
             const auto histTitle = std::string("Histogram #") + (i + 1);
             TH1D hist(histName, histTitle, 100, -10 * (i + 1), 10 * (i + 1));
-            file->Put(histPath, hist);
+            histDir.Put(histName, hist);
          }
 
          // TODO: add RFile impl in RNTupleFileWriter
@@ -408,8 +424,8 @@ TEST(RFile, ComplexExample)
          const auto kNDatasets = 10;
          for (int i = 0; i < kNDatasets; ++i) {
             const auto datasetName = std::string("data_") + (i + 1);
-            const auto datasetPath = runDir + "/data/" + datasetName;
-            const auto dataset = ROOT::RNTupleWriter::Append(model->Clone(), datasetPath, *file);
+            auto datasetDir = runDir.MakeSubdir("data");
+            const auto dataset = ROOT::RNTupleWriter::Append(model->Clone(), datasetName, datasetDir);
             for (int j = 0; j < 100; ++j)
                dataset->Fill();
          }
@@ -425,17 +441,19 @@ TEST(RFile, Closing)
 
    {
       auto file = RFile::Recreate(fileGuard.GetPath());
+      ROOT::Experimental::RDirectory dir(*file);
       std::string s;
-      file->Put("s", s);
+      dir.Put("s", s);
       // Explicitly close the file
       file->Close();
-      EXPECT_THROW(file->Put("ss", s), ROOT::RException);
+      EXPECT_THROW(dir.Put("ss", s), ROOT::RException);
    }
 
    {
       auto file = RFile::OpenForReading(fileGuard.GetPath());
-      EXPECT_NE(file->Get<std::string>("s"), nullptr);
+      ROOT::Experimental::RDirectory dir(*file);
+      EXPECT_NE(dir.Get<std::string>("s"), nullptr);
       file->Close();
-      EXPECT_THROW(file->Get<std::string>("s"), ROOT::RException);
+      EXPECT_THROW(dir.Get<std::string>("s"), ROOT::RException);
    }
 }
