@@ -23,6 +23,7 @@ set_property(TARGET Core APPEND PROPERTY DICT_HEADERS
   ROOT/StringUtils.hxx
   ROOT/span.hxx
   ROOT/TypeTraits.hxx
+  ROOT/TypeParser.hxx
 )
 
 set(FOUNDATION_SOURCES
@@ -33,6 +34,7 @@ set(FOUNDATION_SOURCES
   src/StringUtils.cxx
   src/TClassEdit.cxx
   src/TError.cxx
+  src/TypeParser.cxx
 )
 
 set(FOUNDATION_HEADER_DIRS inc/)
