@@ -353,3 +353,18 @@ TEST(TClassEdit, SplitType)
    auto si = (TStreamerInfo*) c->GetStreamerInfo();
    si->ls("noaddr");
 }
+
+TEST(TClassEdit, ShortType)
+{
+   auto shortType = TClassEdit::ShortType("std::conditional<(1 > 32), int, float>", 0);
+   EXPECT_EQ(shortType, "std::conditional<(1>32),int,float>");
+
+   shortType = TClassEdit::ShortType("std::conditional<(1 < 32), int, float>", 0);
+   EXPECT_EQ(shortType, "std::conditional<(1<32),int,float>");
+
+   shortType = TClassEdit::ShortType("std::function<bool(std::vector<int>)>", 0);
+   EXPECT_EQ(shortType, "std::function<bool(std::vector<int>)>");
+
+   shortType = TClassEdit::ShortType("std::function<bool(std::vector<int>, float)>", 0);
+   EXPECT_EQ(shortType, "std::function<bool(std::vector<int>,float)>");
+}
