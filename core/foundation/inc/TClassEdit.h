@@ -75,11 +75,11 @@ namespace TClassEdit {
 
    enum EModType {
       kNone             = 0,
-      kDropTrailStar    = 1<<0,
-      kDropDefaultAlloc = 1<<1,
-      kDropAlloc        = 1<<2,
-      kInnerClass       = 1<<3,
-      kInnedMostClass   = 1<<4,
+      kDropTrailStar    = 1<<0, /* remove trailing '*' */
+      kDropDefaultAlloc = 1<<1, /* remove default allocators from STL containers */
+      kDropAlloc        = 1<<2, /* remove all allocators from STL containers */
+      kInnerClass       = 1<<3, /* return immediate inner class of an STL container */
+      kInnedMostClass   = 1<<4, /* return innermost class of STL on an STL container */
       kDropStlDefault   = 1<<5, /* implies kDropDefaultAlloc */
       kDropComparator   = 1<<6, /* if the class has a comparator, drops BOTH the comparator and the Allocator */
       kDropAllDefault   = 1<<7, /* Drop default template parameter even in non STL classes */

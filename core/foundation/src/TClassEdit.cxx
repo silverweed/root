@@ -1356,12 +1356,7 @@ string TClassEdit::CleanType(const char *typeDesc, int mode, const char **tail)
 //////////////////////////////////////////////////////////////////////////////
 /// Return the absolute type of typeDesc.
 /// E.g.: typeDesc = "class const volatile TNamed**", returns "TNamed**".
-/// if (mode&1) remove last "*"s                     returns "TNamed"
-/// if (mode&2) remove default allocators from STL containers
-/// if (mode&4) remove all     allocators from STL containers
-/// if (mode&8) return inner class of stl container. list<innerClass>
-/// if (mode&16) return deapest class of stl container. vector<list<deapest>>
-/// if (mode&kDropAllDefault) remove default template arguments
+/// `mode` is a bitmask of the TClassEdit::EModType enum.
 //////////////////////////////////////////////////////////////////////////////
 
 string TClassEdit::ShortType(const char *typeDesc, int mode)
