@@ -16,6 +16,7 @@
 
 #include <string_view>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <numeric>
@@ -39,6 +40,44 @@ std::string Join(const std::string &sep, StringCollection_t &&strings)
       return "";
    return std::accumulate(std::next(std::begin(strings)), std::end(strings), strings[0],
                           [&sep](auto const &a, auto const &b) { return a + sep + b; });
+}
+
+/**
+ * \brief Creates a copy of a string with whitespaces at the beginning removed.
+ */
+inline std::string TrimLeft(std::string_view str)
+{
+   auto idx = 0u;
+   while (idx < str.size() && std::isspace(str[idx]))
+      ++idx;
+   std::string s(str.substr(idx));
+   return s;
+}
+
+/**
+ * \brief Creates a copy of a string with whitespaces at the end removed.
+ */
+inline std::string TrimRight(std::string_view str)
+{
+   if (str.empty())
+      return "";
+
+   auto idx = 0u;
+   auto len = str.size();
+   while (idx < len && std::isspace(str[len - idx - 1]))
+      ++idx;
+   std::string s(str.substr(0, len - idx));
+   return s;
+}
+
+/**
+ * \brief Creates a copy of a string with whitespaces at the beginning and end removed.
+ */
+inline std::string Trim(std::string_view str)
+{
+   auto s = TrimLeft(str);
+   s = TrimRight(s);
+   return s;
 }
 
 std::string Round(double value, double error, unsigned int cutoff = 1, std::string_view delim = "#pm");
