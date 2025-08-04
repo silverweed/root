@@ -83,13 +83,14 @@ TEST(TypeParser, LexNumbers)
              VT({TToken::Number("1e10"), kMinus, TToken::Number("3.0f"), kPlus, TToken::Number("0x4.5p7")}));
 }
 
-TEST(TypeParser, LexStrings) {
-  EXPECT_EQ(TLexer::Tokenize("\"\""), VT({TToken::String("")}));
-  EXPECT_EQ(TLexer::Tokenize("\"asd\""), VT({TToken::String("asd")}));
-  EXPECT_EQ(TLexer::Tokenize("\" asd  \""), VT({TToken::String(" asd  ")}));
-  EXPECT_EQ(TLexer::Tokenize("\"'\""), VT({TToken::String("'")}));
-  EXPECT_EQ(TLexer::Tokenize("''"), VT({{kInvalid}}));
-  EXPECT_EQ(TLexer::Tokenize("' '"), VT({TToken::Char(' ')}));
+TEST(TypeParser, LexStrings)
+{
+   EXPECT_EQ(TLexer::Tokenize("\"\""), VT({TToken::String("")}));
+   EXPECT_EQ(TLexer::Tokenize("\"asd\""), VT({TToken::String("asd")}));
+   EXPECT_EQ(TLexer::Tokenize("\" asd  \""), VT({TToken::String(" asd  ")}));
+   EXPECT_EQ(TLexer::Tokenize("\"'\""), VT({TToken::String("'")}));
+   EXPECT_EQ(TLexer::Tokenize("''"), VT({{kInvalid}}));
+   EXPECT_EQ(TLexer::Tokenize("' '"), VT({TToken::Char(' ')}));
 }
 
 TEST(TypeParser, ParseTypeSimple)
@@ -142,28 +143,26 @@ TEST(TypeParser, ParseTypeNested)
    EXPECT_EQ(tree.fNodes[0].fType.fQual, TType::kVolatile);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kExpr);
-   EXPECT_EQ(tree.fNodes[1].fExpr, "5");
+   EXPECT_EQ(tree.fNodes[1].fExpr.fType, TExpr::kLeaf);
+   EXPECT_EQ(tree.fNodes[1].fExpr.fStr, "5");
+
+   tree = ParseType("T<(a > (1 == 3))>");
+   ASSERT_EQ(tree.fNodes.size(), 8);
+   ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
+   EXPECT_EQ(tree.fNodes[0].fType.fName, "T");
+   EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "");
+   EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
+   ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kExpr);
 
    tree = ParseType("::Type<(5 > 3), bar::Foo<(2 < 3)>>");
-   ASSERT_EQ(tree.fNodes.size(), 6);
+   ASSERT_EQ(tree.fNodes.size(), 10);
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "Type");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "::");
    EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kExpr);
-   EXPECT_EQ(tree.fNodes[1].fExpr, "(5>3)");
-   ASSERT_EQ(tree.fNodes[2].fNodeType, TNode::kExpr);
-   EXPECT_EQ(tree.fNodes[2].fExpr, "5>3");
-   ASSERT_EQ(tree.fNodes[3].fNodeType, TNode::kType);
-   EXPECT_EQ(tree.fNodes[3].fType.fName, "Foo");
-   EXPECT_EQ(tree.fNodes[3].fType.fNamespace, "bar::");
-   EXPECT_EQ(tree.fNodes[3].fType.fQual, 0);
-   EXPECT_EQ(tree.fNodes[3].fType.fIndirection, TType::EIndirection::kNone);
-   ASSERT_EQ(tree.fNodes[4].fNodeType, TNode::kExpr);
-   EXPECT_EQ(tree.fNodes[4].fExpr, "(2<3)");
-   ASSERT_EQ(tree.fNodes[5].fNodeType, TNode::kExpr);
-   EXPECT_EQ(tree.fNodes[5].fExpr, "2<3");
 
    tree = ParseType("short *const *");
    ASSERT_EQ(tree.fNodes.size(), 3);
@@ -279,6 +278,24 @@ TEST(TypeParser, ParseTypeNested)
    EXPECT_EQ(secondChild->fType.fNamespace, "");
    EXPECT_EQ(secondChild->fType.fQual, TType::kVolatile);
    EXPECT_EQ(secondChild->fType.fIndirection, TType::EIndirection::kNone);
+
+   tree = ParseType("T<v[2]>");
+   ASSERT_EQ(tree.fNodes.size(), 4);
+   root = &tree.fNodes[0];
+   ASSERT_EQ(root->fNodeType, TNode::kType);
+   EXPECT_EQ(root->fType.fName, "T");
+   firstChild = root->fFirstChild;
+   ASSERT_EQ(firstChild->fNodeType, TNode::kExpr);
+   EXPECT_EQ(firstChild->fExpr.fStr, "[");
+   EXPECT_EQ(firstChild->fExpr.fType, TExpr::kBinOp);
+   secondChild = firstChild->fFirstChild;
+   ASSERT_EQ(secondChild->fNodeType, TNode::kExpr);
+   EXPECT_EQ(secondChild->fExpr.fStr, "v");
+   EXPECT_EQ(secondChild->fExpr.fType, TExpr::kLeaf);
+   ASSERT_NE(secondChild->fNextSibling, nullptr);
+   ASSERT_EQ(secondChild->fNextSibling->fNodeType, TNode::kExpr);
+   EXPECT_EQ(secondChild->fNextSibling->fExpr.fStr, "2");
+   EXPECT_EQ(secondChild->fNextSibling->fExpr.fType, TExpr::kLeaf);
 }
 
 TEST(TypeParser, ShortType)
@@ -286,4 +303,12 @@ TEST(TypeParser, ShortType)
    EXPECT_EQ(ShortType("const int").Unwrap(), "int");
    EXPECT_EQ(ShortType("short*").Unwrap(), "short*");
    EXPECT_EQ(ShortType("const volatile class TNamed**").Unwrap(), "TNamed**");
+   EXPECT_EQ(ShortType("std::conditional_t<(T > 32), int, float>").Unwrap(), "std::conditional_t<(T>32),int,float>");
+   EXPECT_EQ(ShortType("std::conditional_t<(T < 32), int, float>").Unwrap(), "std::conditional_t<(T<32),int,float>");
+   EXPECT_EQ(ShortType("std::conditional_t<(T < (A >= (32))), int, float>").Unwrap(),
+             "std::conditional_t<(T<(A>=(32))),int,float>");
+   EXPECT_EQ(ShortType("T<v[2]+1>").Unwrap(), "T<v[2]+1>");
+   EXPECT_EQ(ShortType("T<v[2 + a[1]]>").Unwrap(), "T<v[2+a[1]]>");
+   EXPECT_EQ(ShortType("T<a[b[c+(d)]] - a[1]>").Unwrap(), "T<a[b[c+(d)]]-a[1]>");
+   EXPECT_EQ(ShortType("T<a[0][1] - b[(a[1]+2)][5]>").Unwrap(), "T<a[0][1]-b[(a[1]+2)][5]>");
 }

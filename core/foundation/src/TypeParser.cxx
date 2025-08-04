@@ -1,3 +1,8 @@
+/// \file TypeParser.cxx
+/// \ingroup Core
+/// \author Giacomo Parolini <giacomo.parolini@cern.ch>
+/// \date 2025-08-04
+
 #include <ROOT/TypeParser.hxx>
 
 #include <ROOT/StringUtils.hxx>
@@ -204,6 +209,34 @@ void TLexer::TokenizeAndPrint(std::string_view src, std::ostream &out)
    }
 }
 
+TToken TToken::Ident(std::string_view str)
+{
+   TToken tok = {kIdent};
+   tok.fStr = str;
+   return tok;
+}
+
+TToken TToken::Char(char ch)
+{
+   TToken tok = {kCharacter};
+   tok.fStr = ch;
+   return tok;
+}
+
+TToken TToken::String(std::string_view str)
+{
+   TToken tok = {kString};
+   tok.fStr = str;
+   return tok;
+}
+
+TToken TToken::Number(std::string_view str)
+{
+   TToken tok = {kNumber};
+   tok.fStr = str;
+   return tok;
+}
+
 TToken TToken::Fixed(std::string_view fixed)
 {
    TToken tok = {};
@@ -254,49 +287,45 @@ std::string TToken::ToString() const
    return ss.str();
 }
 
-void TNodeTree::PushNesting()
+TNode *TNodeTree::PushNode(TNode::ENodeType type)
 {
-   assert(fNodes.size() > 0);
-   fCurNode = &fNodes.back();
+   auto &newNode = fNodes.emplace_back();
+   newNode.fNodeType = type;
+   return &newNode;
 }
 
-void TNodeTree::PopNesting()
+void TNodeTree::AddChild(TNode *parent, TNode *newChild)
 {
-   assert(fCurNode);
-   fCurNode = fCurNode->fParent;
+   newChild->fParent = parent;
+   if (parent) {
+      TNode *child = parent->fFirstChild;
+      if (!child)
+         parent->fFirstChild = newChild;
+      else {
+         while (child->fNextSibling)
+            child = child->fNextSibling;
+         child->fNextSibling = newChild;
+      }
+   }
 }
 
-void TNodeTree::AddNode(TNode::ENodeType type)
+void TNodeTree::WrapNode(TNode *&node)
 {
-   fNodes.emplace_back().fNodeType = type;
-
-   auto &newNode = fNodes.back();
-   newNode.fParent = fCurNode;
-
-   if (!fCurNode)
-      fCurNode = &newNode;
-   else if (fCurNode->fFirstChild)
-      fCurNode->fFirstChild->fNextSibling = &newNode;
-   else
-      fCurNode->fFirstChild = &newNode;
+   TNode wrapped = *node; // copy the node to wrap
+   node->fType = {};
+   node->fExpr = {};
+   auto &newNode = fNodes.emplace_back(wrapped);
+   // Adjust links
+   for (TNode *child = node->fFirstChild; child; child = child->fNextSibling)
+      child->fParent = &newNode;
+   newNode.fParent = node;
+   newNode.fNextSibling = nullptr;
+   newNode.fFirstChild = node->fFirstChild;
+   node->fFirstChild = &newNode;
 }
 
-TType &TNodeTree::GetCurType()
+static void ParseCvList(TLexer &lex, TType &type)
 {
-   assert(fCurNode->fNodeType == TNode::kType);
-   return fCurNode->fType;
-}
-
-TExpr &TNodeTree::GetCurExpr()
-{
-   assert(fCurNode->fNodeType == TNode::kExpr);
-   return fCurNode->fExpr;
-}
-
-static void ParseCvList(TLexer &lex, TNodeTree &tree)
-{
-   auto &type = tree.GetCurType();
-
    TToken tok = lex.Peek();
    while (tok.fType == kKwConst || tok.fType == kKwVolatile) {
       type.fQual |= (tok.fType == kKwConst) ? TType::kConst : TType::kVolatile;
@@ -305,10 +334,8 @@ static void ParseCvList(TLexer &lex, TNodeTree &tree)
    }
 }
 
-static void ParseNamespace(TLexer &lex, TNodeTree &tree)
+static void ParseNamespace(TLexer &lex, TType &type)
 {
-   auto &type = tree.GetCurType();
-
    TToken tok = lex.Peek();
    if (tok.fType == kIdent) {
       lex.Consume();
@@ -324,13 +351,13 @@ static void ParseNamespace(TLexer &lex, TNodeTree &tree)
    if (tok.fType == kColonColon) {
       type.fNamespace += "::";
       lex.Consume();
-      ParseNamespace(lex, tree);
+      ParseNamespace(lex, type);
    }
 }
 
-static void ParseTypeSpecifier(TLexer &lex, TNodeTree &tree)
+static void ParseTypeSpecifier(TLexer &lex, TNode &type)
 {
-   (void)tree;
+   (void)type;
 
    TToken tok = lex.Peek();
    if (tok.fType == kKwClass || tok.fType == kKwStruct || tok.fType == kKwEnum) {
@@ -350,7 +377,7 @@ static bool IsBinOp(ETokType type)
    return type == kKwAnd || type == kKwOr || type == kKwBitand || type == kKwBitor || type == kAndAnd ||
           type == kOrOr || type == kAnd || type == kOr || type == kXor || type == kArrow || type == kPlus ||
           type == kMinus || type == kStar || type == kSlash || type == kLe || type == kGe || type == kLt ||
-          type == kGt || type == kEq || type == kNe;
+          type == kGt || type == kEq || type == kNe || type == kOpenSquare;
 }
 
 static const char *FixedToStr(ETokType type)
@@ -361,76 +388,159 @@ static const char *FixedToStr(ETokType type)
    return "";
 }
 
-static bool ParseExpr(TLexer &lex, TNodeTree &tree)
+static int GetBinOpPrecedence(ETokType op)
 {
-   auto *expr = &tree.GetCurExpr();
+   // clang-format off
+   switch (op) {
+   case kArrow:
+   case kOpenSquare:
+      return 2;
+   case kStar:
+   case kSlash:
+      return 5;
+   case kPlus:
+   case kMinus:
+      return 6;
+   case kLe:
+   case kGe:
+   case kLt:
+   case kGt:
+      return 9;
+   case kEq:
+   case kNe:
+      return 10;
+   case kAnd:
+   case kKwBitand:
+      return 11;
+   case kXor:
+   case kKwXor:
+      return 12;
+   case kOr:
+   case kKwBitor:
+      return 13;
+   case kAndAnd:
+   case kKwAnd:
+      return 14;
+   case kOrOr:
+   case kKwOr:
+      return 15;
+   default:
+      assert(false);
+      return 0;
+   }
+   // clang-format on
+}
+
+constexpr int kLowestPrecedence = 100;
+
+static TNode *ParseExpr(TLexer &lex, TNodeTree &tree, const TNode *parent, int minPrecedence);
+static TNode *ParseLeaf(TLexer &lex, TNodeTree &tree);
+
+static TNode *
+ParseExprIncreasingPrecedence(TLexer &lex, TNodeTree &tree, TNode *left, const TNode *parent, int minPrecedence)
+{
    TToken tok = lex.Peek();
-   // expr :: [unary-op] (number | string | ident) | "(" [expr] ")" | expr [binop] expr
-   if (IsUnaryOp(tok.fType)) {
-      *expr += FixedToStr(tok.fType);
-      lex.Consume();
-      tok = lex.Peek();
-   }
-   if (tok.fType == kOpenRound) {
-      lex.Consume();
-      *expr += "(";
-      if (lex.Peek().fType != kCloseRound) {
-         tree.AddNode(TNode::kExpr);
-         tree.PushNesting();
-         if (!ParseExpr(lex, tree))
-            return false;
-         *expr += tree.GetCurExpr();
-         tree.PopNesting();
-      }
-      *expr += ")";
-      tok = lex.Peek();
-      if (tok.fType != kCloseRound) {
-         tree.fErrors.push_back("unterminated parens expression");
-         return false;
-      }
-      lex.Consume();
-   }
+   if (!IsBinOp(tok.fType))
+      return left;
 
-   expr = &tree.GetCurExpr();
-   if (tok.fType == kNumber || tok.fType == kString || tok.fType == kCharacter) {
-      *expr += tok.fStr;
-      lex.Consume();
-      tok = lex.Peek();
-   }
+   int precedence = GetBinOpPrecedence(tok.fType);
+   if (precedence > minPrecedence)
+      return left;
 
-   // Note that we don't care about operator precedence, we just want to parse until the end of
-   // the expression.
-   if (IsBinOp(tok.fType)) {
-      // Kinda workaround for treating '>' as an operator vs a close template.
-      // We currently treat it as an operator if we're in the middle of a parentheses operation
-      if (tok.fType != kGt || (tree.fCurNode->fParent && tree.fCurNode->fParent->fNodeType == TNode::kExpr)) {
-         *expr += FixedToStr(tok.fType);
-         lex.Consume();
-         if (!ParseExpr(lex, tree))
-            return false;
-         tok = lex.Peek();
-      }
-   }
+   // Kinda workaround for treating '>' as an operator vs a close template.
+   // We currently treat it as an operator if we're in the middle of a parentheses operation
+   const bool isActuallyBinOp = (tok.fType != kGt || (parent && parent->fNodeType == TNode::kExpr));
+   if (!isActuallyBinOp)
+      return left;
 
-   if (tok.fType == kOpenSquare) {
-      *expr += FixedToStr(tok.fType);
-      lex.Consume();
-      if (!ParseExpr(lex, tree))
-         return false;
+   lex.Consume();
+
+   // Found a binary operator: turn the current expression into its left-hand side.
+   TNode *binopExpr = tree.PushNode(TNode::kExpr);
+   binopExpr->fExpr.fType = TExpr::kBinOp;
+   binopExpr->fExpr.fStr = FixedToStr(tok.fType);
+
+   // parse right-hand side
+   const bool isArraySub = tok.fType == kOpenSquare;
+   TNode *right = ParseExpr(lex, tree, binopExpr, isArraySub ? kLowestPrecedence : precedence);
+
+   if (isArraySub) {
       tok = lex.Peek();
       if (tok.fType != kCloseSquare) {
          tree.fErrors.push_back("unterminated array expression");
-         return false;
+         return nullptr;
       }
       lex.Consume();
+      tok = lex.Peek();
    }
 
-   return true;
+   tree.AddChild(binopExpr, left);
+   tree.AddChild(binopExpr, right);
+
+   return binopExpr;
 }
 
-static bool ParseTypeInternal(TLexer &lex, TNodeTree &tree);
+static TNode *ParseLeaf(TLexer &lex, TNodeTree &tree)
+{
+   TNode *expr = nullptr;
+   TToken tok = lex.Peek();
 
-static bool ParseTemplate(TLexer &lex, TNodeTree &tree)
+   // We consider the unary operator as having the lowest possible precedence.
+   // (Note that we don't really care about its precedence).
+   if (IsUnaryOp(tok.fType)) {
+      lex.Consume();
+      expr = tree.PushNode(TNode::kExpr);
+      expr->fExpr.fStr = FixedToStr(tok.fType);
+      expr->fExpr.fType = TExpr::kUnaryOp;
+      TNode *inner = ParseExpr(lex, tree, expr, kLowestPrecedence);
+      tree.AddChild(expr, inner);
+   } else if (tok.fType == kOpenRound) {
+      lex.Consume();
+      expr = tree.PushNode(TNode::kExpr);
+      expr->fExpr.fType = TExpr::kParens;
+      if (lex.Peek().fType != kCloseRound) {
+         TNode *inner = ParseExpr(lex, tree, expr, kLowestPrecedence);
+         tree.AddChild(expr, inner);
+      }
+      tok = lex.Peek();
+      if (tok.fType != kCloseRound) {
+         tree.fErrors.push_back("unterminated parens expression");
+         return nullptr;
+      }
+      lex.Consume();
+   } else if (tok.fType == kNumber || tok.fType == kString || tok.fType == kCharacter || tok.fType == kIdent) {
+      lex.Consume();
+      expr = tree.PushNode(TNode::kExpr);
+      expr->fExpr.fType = TExpr::kLeaf;
+      expr->fExpr.fStr = tok.fStr;
+   }
+
+   return expr;
+}
+
+static TNode *ParseExpr(TLexer &lex, TNodeTree &tree, const TNode *parent, int minPrecedence)
+{
+   TToken tok = lex.Peek();
+
+   // expr :: [unary-op] (number | string | ident) | "(" [expr] ")" | expr [binop] expr
+   TNode *left = ParseLeaf(lex, tree);
+   if (!left) {
+      return nullptr;
+   }
+
+   while (left) {
+      TNode *node = ParseExprIncreasingPrecedence(lex, tree, left, parent, minPrecedence);
+      if (node == left)
+         break;
+      left = node;
+   }
+
+   return left;
+}
+
+static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree);
+
+static bool ParseTemplate(TLexer &lex, TNodeTree &tree, TNode &parentType)
 {
    TToken tok = lex.Peek();
    if (tok.fType == kLt) {
@@ -445,19 +555,27 @@ static bool ParseTemplate(TLexer &lex, TNodeTree &tree)
              tok.fType == kCharacter) {
             childType = TNode::kExpr;
          }
-         tree.AddNode(childType);
-         tree.PushNesting();
-
-         if (childType == TNode::kType) {
-            if (!ParseTypeInternal(lex, tree)) {
-               return false;
+         // special case: check if this is an array expression
+         if (tok.fType == kIdent) {
+            lex.Consume();
+            tok = lex.Peek();
+            if (tok.fType == kOpenSquare) {
+               childType = TNode::kExpr;
             }
-         } else {
-            if (!ParseExpr(lex, tree))
-               return false;
+            lex.Rewind();
+            tok = lex.Peek();
          }
 
-         tree.PopNesting();
+         TNode *newChild = nullptr;
+         if (childType == TNode::kType) {
+            newChild = ParseTypeInternal(lex, tree);
+         } else {
+            newChild = ParseExpr(lex, tree, &parentType, kLowestPrecedence);
+         }
+         if (!newChild)
+            return false;
+
+         tree.AddChild(&parentType, newChild);
 
          tok = lex.Peek();
          lex.Consume();
@@ -482,37 +600,27 @@ static TType::EIndirection TokTypeToIndirection(ETokType type)
    }
 }
 
-static void ParseRefsAndPtrs(TLexer &lex, TNodeTree &tree)
+static void ParseRefsAndPtrs(TLexer &lex, TNodeTree &tree, TNode *type)
 {
+   assert(type->fNodeType == TNode::kType);
+
    TToken tok = lex.Peek();
-   // TNode *prevNode = tree.fCurNode;
    while (tok.fType == kAnd || tok.fType == kAndAnd || tok.fType == kStar) {
       // When we find a ptr or ref we wrap the current node in another node that represents the indirection.
-      TNode wrapped = *tree.fCurNode; // copy the current node
-      tree.fCurNode->fType = {};
-      tree.fCurNode->fType.fIndirection = TokTypeToIndirection(tok.fType);
-      auto &newNode = tree.fNodes.emplace_back(wrapped);
-      // Adjust links
-      if (tree.fCurNode->fFirstChild)
-         tree.fCurNode->fFirstChild->fParent = &newNode;
-      newNode.fParent = tree.fCurNode;
-      newNode.fNextSibling = nullptr;
-      newNode.fFirstChild = tree.fCurNode->fFirstChild;
-      tree.fCurNode->fFirstChild = &newNode;
+      tree.WrapNode(type);
+      type->fType.fIndirection = TokTypeToIndirection(tok.fType);
 
       lex.Consume();
 
       // Note that we do NOT push the wrapped node as the new latest node until we're done with parsing ptrs and
       // refs, as each new ptr/ref refers to the outermost node of the new hierarchy.
-      ParseCvList(lex, tree);
+      ParseCvList(lex, type->fType);
 
       tok = lex.Peek();
    }
-   // if (prevNode != tree.fCurNode)
-   //    tree.PushNesting();
 }
 
-static bool ParseTypeInternal(TLexer &lex, TNodeTree &tree)
+static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
 {
    // A type should look something like this:
    //
@@ -525,52 +633,53 @@ static bool ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    // types :: type ["," types]
    // exprs :: expr ["," exprs]
    // expr :: [unary-op] (number | string | ident) | "(" [exprs] ")" | expr [binop] expr
-   ParseCvList(lex, tree);
-   ParseNamespace(lex, tree);
-   ParseTypeSpecifier(lex, tree);
+   TNode *type = tree.PushNode(TNode::kType);
+   ParseCvList(lex, type->fType);
+   ParseNamespace(lex, type->fType);
+   ParseTypeSpecifier(lex, *type);
 
    // parse type name
-   auto &type = tree.GetCurType();
    TToken tok = lex.Peek();
    if (tok.fType != kIdent) {
       tree.fErrors.push_back("expected type name, found " + tok.ToString());
-      return false;
+      return nullptr;
    }
-   type.fName = tok.fStr;
+   type->fType.fName = tok.fStr;
    lex.Consume();
 
-   if (!ParseTemplate(lex, tree))
-      return false;
+   if (!ParseTemplate(lex, tree, *type))
+      return nullptr;
 
-   ParseCvList(lex, tree);
-   ParseRefsAndPtrs(lex, tree);
+   ParseCvList(lex, type->fType);
+   ParseRefsAndPtrs(lex, tree, type);
 
-   return true;
+   return type;
 }
 
 TNodeTree ParseType(std::string_view src)
 {
+   // std::cout << src << "\n";
+
    TNodeTree res;
 
    TLexer lex{src};
 
-   // Push root node (assume it's a type, otherwise we'll error out)
-   res.AddNode(TNode::kType);
-
    ParseTypeInternal(lex, res);
+
+   // std::cout << "-------------\n";
+   // res.PrintTreeDebug();
+   // std::cout << "-------------\n";
 
    return res;
 }
 
-void PrintNode(std::ostream &out, const TNode &node, int flags, int indent)
+static void PrintNode(std::ostream &out, const TNode &node, int flags);
+
+static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 {
-   std::string indentStr;
-   indentStr.resize(indent, ' ');
+   assert(node.fNodeType == TNode::kType);
 
-   if (flags & kPrintDebug)
-      out << indentStr << ((node.fNodeType == TNode::kType) ? "Type " : "Expr ");
-
-   if (node.fNodeType == TNode::kType && node.fType.fIndirection == TType::EIndirection::kNone) {
+   if (node.fType.fIndirection == TType::EIndirection::kNone) {
       if (!(flags & kStripCV)) {
          if (node.fType.fQual & TType::kConst)
             out << "const ";
@@ -579,14 +688,23 @@ void PrintNode(std::ostream &out, const TNode &node, int flags, int indent)
       }
       if (!(flags & kStripNamespace))
          out << node.fType.fNamespace << node.fType.fName;
-   } else if (node.fNodeType == TNode::kExpr) {
-      out << node.fExpr;
    }
 
-   for (TNode *child = node.fFirstChild; child; child = child->fNextSibling)
-      PrintNode(out, *child, flags, indent + 2);
+   if (node.fFirstChild) {
+      if (node.fType.fIndirection == TType::EIndirection::kNone)
+         out << '<';
 
-   if (node.fNodeType == TNode::kType && node.fType.fIndirection != TType::EIndirection::kNone) {
+      for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
+         PrintNode(out, *child, flags);
+         if (child->fNextSibling)
+            out << ',';
+      }
+
+      if (node.fType.fIndirection == TType::EIndirection::kNone)
+         out << '>';
+   }
+
+   if (node.fType.fIndirection != TType::EIndirection::kNone) {
       if (!(flags & kStripRefs) && node.fType.fIndirection == TType::EIndirection::kRef)
          out << "&";
       if (!(flags & kStripRefs) && node.fType.fIndirection == TType::EIndirection::kRvRef)
@@ -601,12 +719,94 @@ void PrintNode(std::ostream &out, const TNode &node, int flags, int indent)
    }
 }
 
+static void PrintExprNode(std::ostream &out, const TNode &node, int flags)
+{
+   assert(node.fNodeType == TNode::kExpr);
+
+   switch (node.fExpr.fType) {
+   case TExpr::kLeaf:
+      assert(!node.fFirstChild);
+      out << node.fExpr.fStr;
+      break;
+
+   case TExpr::kUnaryOp:
+      assert(node.fFirstChild);
+      assert(!node.fFirstChild->fNextSibling);
+
+      out << node.fExpr.fStr;
+      PrintExprNode(out, *node.fFirstChild, flags);
+      break;
+
+   case TExpr::kBinOp:
+      assert(node.fFirstChild);
+      assert(node.fFirstChild->fNextSibling);
+      assert(!node.fFirstChild->fNextSibling->fNextSibling);
+
+      PrintExprNode(out, *node.fFirstChild, flags);
+      out << node.fExpr.fStr;
+      PrintExprNode(out, *node.fFirstChild->fNextSibling, flags);
+      // Special case: array subscript
+      if (node.fExpr.fStr == "[")
+         out << ']';
+      break;
+
+   case TExpr::kParens:
+      out << '(';
+      for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
+         PrintExprNode(out, *child, flags);
+      }
+      out << ')';
+      break;
+
+   default: assert(false);
+   }
+}
+
+static void PrintNode(std::ostream &out, const TNode &node, int flags)
+{
+   if (node.fNodeType == TNode::kType) {
+      PrintTypeNode(out, node, flags);
+   } else {
+      PrintExprNode(out, node, flags);
+   }
+}
+
 void TNodeTree::Print(std::ostream &out, int flags) const
 {
    if (fNodes.empty())
       return;
 
    PrintNode(out, fNodes[0], flags);
+}
+
+static void PrintNodeDebug(std::ostream &out, const TNode &node, int indent)
+{
+   for (int i = 0; i < indent; ++i)
+      out << ' ';
+
+   if (node.fNodeType == TNode::kType) {
+      if (node.fType.fIndirection == TType::EIndirection::kNone)
+         out << "Type " << node.fType.fNamespace << "::" << node.fType.fName;
+      else {
+         PrintTo(node.fType.fIndirection, &out);
+         out << " to:";
+      }
+   } else {
+      out << node.fExpr.fType << " Expr: ";
+      out << node.fExpr.fStr;
+   }
+   out << "\n";
+
+   for (TNode *child = node.fFirstChild; child; child = child->fNextSibling)
+      PrintNodeDebug(out, *child, indent + 2);
+}
+
+void TNodeTree::PrintTreeDebug(std::ostream &out) const
+{
+   if (fNodes.empty())
+      return;
+
+   PrintNodeDebug(out, fNodes[0], 0);
 }
 
 ROOT::RResult<std::string> ShortType(std::string_view typeDesc)
@@ -628,6 +828,17 @@ void PrintTo(const TType::EIndirection &t, std::ostream *os)
    case TType::EIndirection::kRef: *os << "Ref"; return;
    case TType::EIndirection::kPtr: *os << "Ptr"; return;
    case TType::EIndirection::kRvRef: *os << "RvRef"; return;
+   }
+}
+
+std::ostream &operator<<(std::ostream &out, TExpr::EType type)
+{
+   switch (type) {
+   case TExpr::kLeaf: out << "Leaf"; return out;
+   case TExpr::kUnaryOp: out << "UnaryOp"; return out;
+   case TExpr::kBinOp: out << "BinOp"; return out;
+   case TExpr::kParens: out << "Parens"; return out;
+   default: assert(false); return out;
    }
 }
 
