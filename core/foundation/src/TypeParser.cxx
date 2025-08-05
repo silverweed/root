@@ -19,10 +19,10 @@ static const std::size_t kNumKeywords = kFirstNonKeyword - kFirstFixed;
 // NOTE: must be in the same order as ETokType.
 // Strings with the same prefixes must come in order from longest to shortest.
 static const char *const kFixeds[] = {
-   "const", "volatile", "not",    "and", "or", "bitand", "bitor", "xor", "class", "struct",
-   "union", "enum",     "sizeof", "&&",  "||", "&",      "|",     "^",   "~",     "++",
-   "--",    "->",       "+",      "-",   "*",  "/",      "::",    "<=",  ">=",    "<",
-   ">",     "==",       "!=",     "!",   ",",  ".",      "(",     ")",   "[",     "]"};
+   "const", "volatile", "not", "and", "or", "bitand", "bitor", "xor", "class", "struct", "union",
+   "enum",  "sizeof",   "&&",  "||",  "&",  "|",      "^",     "~",   "++",    "--",     "->",
+   "+",     "-",        "*",   "/",   "::", "<<",     ">>",    "<=",  ">=",    "<",      ">",
+   "==",    "!=",       "!",   ",",   ".",  "(",      ")",     "[",   "]"};
 static_assert(std::size(kFixeds) == kNumFixeds);
 
 static bool IsStartOfNumber(char ch)
@@ -60,7 +60,7 @@ bool TLexer::IsWordTerminator(std::size_t pos) const
    return std::isspace(ch) || PeekFixed(pos) >= static_cast<int>(kNumKeywords);
 }
 
-TToken TLexer::PeekInternal()
+TToken TLexer::PeekInternal(int flags)
 {
    std::size_t srcSize = fSrc.size();
 
@@ -138,16 +138,20 @@ TToken TLexer::PeekInternal()
       // fixed
       int fixedIdx = PeekFixed(cur - 1);
       while (fixedIdx >= 0) {
+         const ETokType tokType = static_cast<ETokType>(kFirstFixed + fixedIdx);
+         const bool mustSkipShiftRight = ((flags & kPeekForceSplitGt) && tokType == kShiftRight);
          const char *keyword = kFixeds[fixedIdx];
          auto kwLen = strlen(keyword);
          const auto endPos = cur - 1 + kwLen;
          // For keyword tokens, check if it ends properly (e.g. "constf" should be an ident, not keyword "const").
-         if (endPos == srcSize ||
-             (endPos < srcSize && (fixedIdx >= (int)kFirstNonKeyword || IsWordTerminator(endPos)))) {
+         const auto terminatesProperly =
+            (endPos == srcSize ||
+             (endPos < srcSize && (fixedIdx >= (int)kFirstNonKeyword || IsWordTerminator(endPos))));
+         if (!mustSkipShiftRight && terminatesProperly) {
             cur += kwLen - 1;
             fNext = cur;
             TToken tok;
-            tok.fType = static_cast<ETokType>(kFirstFixed + fixedIdx);
+            tok.fType = tokType;
             return tok;
          }
          // Try again: maybe that was a keyword with matching prefix but there is a valid one later.
@@ -177,9 +181,9 @@ TToken TLexer::PeekInternal()
    return {kEOF};
 }
 
-TToken TLexer::Peek()
+TToken TLexer::Peek(int flags)
 {
-   fLatestToken = PeekInternal();
+   fLatestToken = PeekInternal(flags);
    return fLatestToken;
 }
 
@@ -403,6 +407,9 @@ static int GetBinOpPrecedence(ETokType op)
    case kPlus:
    case kMinus:
       return 6;
+   case kShiftLeft:
+   case kShiftRight:
+      return 7;
    case kLe:
    case kGe:
    case kLt:
@@ -438,6 +445,18 @@ constexpr int kLowestPrecedence = 100;
 static TNode *ParseExpr(TLexer &lex, TNodeTree &tree, const TNode *parent, int minPrecedence);
 static TNode *ParseLeaf(TLexer &lex, TNodeTree &tree);
 
+static bool IsInsideParensExpr(const TNode *parent)
+{
+   while (parent) {
+      if (parent->fNodeType != TNode::kExpr)
+         break;
+      if (parent->fExpr.fType == TExpr::kParens)
+         return true;
+      parent = parent->fParent;
+   }
+   return false;
+}
+
 static TNode *
 ParseExprIncreasingPrecedence(TLexer &lex, TNodeTree &tree, TNode *left, const TNode *parent, int minPrecedence)
 {
@@ -447,9 +466,9 @@ ParseExprIncreasingPrecedence(TLexer &lex, TNodeTree &tree, TNode *left, const T
    if (precedence < kHighestPrecedence || precedence > minPrecedence)
       return left;
 
-   // Kinda workaround for treating '>' as an operator vs a close template.
-   // We currently treat it as an operator if we're in the middle of a parentheses operation
-   const bool isActuallyBinOp = (tok.fType != kGt || (parent && parent->fNodeType == TNode::kExpr));
+   // Kinda workaround for treating '>' and '>>' as an operator vs a close template.
+   // We currently treat it as an operator if we're inside a parentheses operation
+   const bool isActuallyBinOp = ((tok.fType != kGt && tok.fType != kShiftRight) || IsInsideParensExpr(parent));
    if (!isActuallyBinOp)
       return left;
 
@@ -463,6 +482,10 @@ ParseExprIncreasingPrecedence(TLexer &lex, TNodeTree &tree, TNode *left, const T
    // parse right-hand side
    const bool isArraySub = tok.fType == kOpenSquare;
    TNode *right = ParseExpr(lex, tree, binopExpr, isArraySub ? kLowestPrecedence : precedence);
+   if (!right) {
+      tree.fErrors.push_back("failed to parse right-hand side of binary op '" + binopExpr->fExpr.fStr + "'");
+      return nullptr;
+   }
 
    if (isArraySub) {
       tok = lex.Peek();
@@ -493,6 +516,10 @@ static TNode *ParseLeaf(TLexer &lex, TNodeTree &tree)
       expr->fExpr.fStr = FixedToStr(tok.fType);
       expr->fExpr.fType = TExpr::kUnaryOp;
       TNode *inner = ParseExpr(lex, tree, expr, kLowestPrecedence);
+      if (!inner) {
+         tree.fErrors.push_back("failed to parse inner expression of unary op '" + expr->fExpr.fStr + "'");
+         return nullptr;
+      }
       tree.AddChild(expr, inner);
    } else if (tok.fType == kOpenRound) {
       lex.Consume();
@@ -500,6 +527,10 @@ static TNode *ParseLeaf(TLexer &lex, TNodeTree &tree)
       expr->fExpr.fType = TExpr::kParens;
       if (lex.Peek().fType != kCloseRound) {
          TNode *inner = ParseExpr(lex, tree, expr, kLowestPrecedence);
+         if (!inner) {
+            tree.fErrors.push_back("failed to parse inner expression of parens expression");
+            return nullptr;
+         }
          tree.AddChild(expr, inner);
       }
       tok = lex.Peek();
@@ -577,7 +608,7 @@ static bool ParseTemplate(TLexer &lex, TNodeTree &tree, TNode &parentType)
 
          tree.AddChild(&parentType, newChild);
 
-         tok = lex.Peek();
+         tok = lex.Peek(TLexer::kPeekForceSplitGt);
          lex.Consume();
          if (tok.fType == kComma) {
             tok = lex.Peek();
@@ -665,6 +696,11 @@ TNodeTree ParseType(std::string_view src)
    TLexer lex{src};
 
    ParseTypeInternal(lex, res);
+
+   // We should have parsed all tokens
+   if (lex.Peek().fType != kEOF) {
+      res.fErrors.push_back("trailing tokens after type");
+   }
 
    // std::cout << "-------------\n";
    // res.PrintTreeDebug();
@@ -786,7 +822,7 @@ static void PrintNodeDebug(std::ostream &out, const TNode &node, int indent)
 
    if (node.fNodeType == TNode::kType) {
       if (node.fType.fIndirection == TType::EIndirection::kNone)
-         out << "Type " << node.fType.fNamespace << "::" << node.fType.fName;
+         out << "Type " << node.fType.fNamespace << node.fType.fName;
       else {
          PrintTo(node.fType.fIndirection, &out);
          out << " to:";
@@ -813,7 +849,7 @@ ROOT::RResult<std::string> ShortType(std::string_view typeDesc)
 {
    auto tree = ParseType(typeDesc);
    if (!tree.fErrors.empty()) {
-      return R__FAIL(ROOT::Join("\n", tree.fErrors));
+      return R__FAIL("Failed to parse type `" + std::string(typeDesc) + "`: " + ROOT::Join("\n", tree.fErrors));
    }
 
    std::stringstream ss;

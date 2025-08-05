@@ -53,6 +53,8 @@ enum ETokType {
    kStar,
    kSlash,
    kColonColon,
+   kShiftLeft,
+   kShiftRight,
    kLe,
    kGe,
    kLt,
@@ -109,9 +111,15 @@ class TLexer final {
    // Returns the index inside kFixeds or -1 if not found
    int PeekFixed(std::size_t pos, std::size_t firstToCheck = 0) const;
    bool IsWordTerminator(std::size_t pos) const;
-   TToken PeekInternal();
+   TToken PeekInternal(int flags);
 
 public:
+   enum EPeekFlags {
+      kNone = 0,
+      // If true, lex '>>' as two separate '>' tokens.
+      kPeekForceSplitGt = 0x1,
+   };
+
    // These static methods are mostly for debugging/testing. In a real case one should use Peek()/Consume().
    static std::vector<TToken> Tokenize(std::string_view src);
    static void TokenizeAndPrint(std::string_view src, std::ostream &out = std::cout);
@@ -121,7 +129,7 @@ public:
    /// Finds the next token and returns it. Does not advance the internal position (except by skipping whitespaces).
    /// This function is idempotent and will always return the same result if Consume() or Rewind() are not called
    /// in between.
-   TToken Peek();
+   TToken Peek(int flags = 0);
    /// Advances to the next token.
    void Consume();
    /// Goes back to the previous token. The lexer only has 1 step of backtracking available, so this function

@@ -36,11 +36,13 @@ TEST(TypeParser, Lex)
                      TToken::Ident("T"),
                      kComma,
                      TToken::Ident("MyAllocator"),
-                   kGt,
-                 kGt
+                   // NOTE: '>>' is parsed as ShiftRight unless the proper flag is given to TLexer::Peek().
+                   // This happens when properly calling ParseType(), but Tokenize doesn't know about it so we get
+                   // the "wrong" token in this case.
+                   kShiftRight,
              }));
 
-   EXPECT_EQ(TLexer::Tokenize("std::conditional_t<T<32, int,std::list<T, MyAllocator>> "),
+   EXPECT_EQ(TLexer::Tokenize("std::conditional_t<T<32, int,std::list<T, MyAllocator> > "),
              VT({TToken::Ident("std"), kColonColon, TToken::Ident("conditional_t"),
                  kLt,
                    TToken::Ident("T"), kLt, TToken::Number("32"),
@@ -320,14 +322,25 @@ TEST(TypeParser, ShortTypeExpr)
    EXPECT_EQ(ShortType("std::conditional_t<(T < 32), int, float>").Unwrap(), "std::conditional_t<(T<32),int,float>");
    EXPECT_EQ(ShortType("std::conditional_t<(T < (A >= (32))), int, float>").Unwrap(),
              "std::conditional_t<(T<(A>=(32))),int,float>");
+   EXPECT_EQ(ShortType("T<2, *x>").Unwrap(), "T<2,*x>");
+   EXPECT_EQ(ShortType("T<2, (x + 1 > 2)>").Unwrap(), "T<2,(x+1>2)>");
    EXPECT_EQ(ShortType("T<(a->b)>").Unwrap(), "T<(a->b)>");
    EXPECT_EQ(ShortType("T<(a.b->b + c.d)>").Unwrap(), "T<(a.b->b+c.d)>");
+}
+
+TEST(TypeParser, ShortTypeAmbiguous)
+{
+   // We treat any '>' outside of a parens expression as template delimiters.
+   EXPECT_FALSE(bool(ShortType("T<2>3>")));
+   EXPECT_EQ(ShortType("T<(2>3)>").Unwrap(), "T<(2>3)>");
+   EXPECT_FALSE(bool(ShortType("T<2>>3>")));
+   EXPECT_EQ(ShortType("T<(2>>3)>").Unwrap(), "T<(2>>3)>");
 }
 
 TEST(TypeParser, ShortTypeArray)
 {
    EXPECT_EQ(ShortType("T<v[2]+1>").Unwrap(), "T<v[2]+1>");
    EXPECT_EQ(ShortType("T<v[2 + a[1]]>").Unwrap(), "T<v[2+a[1]]>");
-   EXPECT_EQ(ShortType("T<a[b[c+(d)]] - a[1]>").Unwrap(), "T<a[b[c+(d)]]-a[1]>");
+   EXPECT_EQ(ShortType("T<a[b[c+(d>>2)]] - a[1]>").Unwrap(), "T<a[b[c+(d>>2)]]-a[1]>");
    EXPECT_EQ(ShortType("T<a[0][1] - b[(a[1]+2)][5]>").Unwrap(), "T<a[0][1]-b[(a[1]+2)][5]>");
 }
