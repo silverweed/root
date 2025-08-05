@@ -37,6 +37,7 @@ enum ETokType {
    kKwStruct,
    kKwUnion,
    kKwEnum,
+   kKwSizeof,
    kFirstNonKeyword,
    kAndAnd = kFirstNonKeyword,
    kOrOr,
@@ -60,6 +61,7 @@ enum ETokType {
    kNe,
    kNot,
    kComma,
+   kPeriod,
    kOpenRound,
    kCloseRound,
    kOpenSquare,
@@ -102,10 +104,12 @@ class TLexer final {
    std::size_t fCur = 0;
    std::size_t fNext = 0;
    std::size_t fPrev = 0;
+   TToken fLatestToken = {};
 
    // Returns the index inside kFixeds or -1 if not found
    int PeekFixed(std::size_t pos, std::size_t firstToCheck = 0) const;
    bool IsWordTerminator(std::size_t pos) const;
+   TToken PeekInternal();
 
 public:
    // These static methods are mostly for debugging/testing. In a real case one should use Peek()/Consume().

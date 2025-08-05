@@ -19,9 +19,10 @@ static const std::size_t kNumKeywords = kFirstNonKeyword - kFirstFixed;
 // NOTE: must be in the same order as ETokType.
 // Strings with the same prefixes must come in order from longest to shortest.
 static const char *const kFixeds[] = {
-   "const", "volatile", "not", "and", "or", "bitand", "bitor", "xor", "class", "struct", "union", "enum", "&&",
-   "||",    "&",        "|",   "^",   "~",  "++",     "--",    "->",  "+",     "-",      "*",     "/",    "::",
-   "<=",    ">=",       "<",   ">",   "==", "!=",     "!",     ",",   "(",     ")",      "[",     "]"};
+   "const", "volatile", "not",    "and", "or", "bitand", "bitor", "xor", "class", "struct",
+   "union", "enum",     "sizeof", "&&",  "||", "&",      "|",     "^",   "~",     "++",
+   "--",    "->",       "+",      "-",   "*",  "/",      "::",    "<=",  ">=",    "<",
+   ">",     "==",       "!=",     "!",   ",",  ".",      "(",     ")",   "[",     "]"};
 static_assert(std::size(kFixeds) == kNumFixeds);
 
 static bool IsStartOfNumber(char ch)
@@ -59,7 +60,7 @@ bool TLexer::IsWordTerminator(std::size_t pos) const
    return std::isspace(ch) || PeekFixed(pos) >= static_cast<int>(kNumKeywords);
 }
 
-TToken TLexer::Peek()
+TToken TLexer::PeekInternal()
 {
    std::size_t srcSize = fSrc.size();
 
@@ -118,7 +119,8 @@ TToken TLexer::Peek()
       }
 
       // number
-      if (IsStartOfNumber(ch)) {
+      // NOTE: we check the latest token so we avoid returning "number" in cases like `x.y`
+      if (fLatestToken.fType != kIdent && IsStartOfNumber(ch)) {
          // NOTE: we don't really decode or validate the number, we simply skip ahead until the string looks like one.
          TToken token = {kNumber};
          token.fStr = ch;
@@ -173,6 +175,12 @@ TToken TLexer::Peek()
    assert(cur == srcSize);
    fNext = cur;
    return {kEOF};
+}
+
+TToken TLexer::Peek()
+{
+   fLatestToken = PeekInternal();
+   return fLatestToken;
 }
 
 void TLexer::Consume()
@@ -372,14 +380,6 @@ static bool IsUnaryOp(ETokType type)
           type == kPlus || type == kMinus || type == kStar || type == kNot;
 }
 
-static bool IsBinOp(ETokType type)
-{
-   return type == kKwAnd || type == kKwOr || type == kKwBitand || type == kKwBitor || type == kAndAnd ||
-          type == kOrOr || type == kAnd || type == kOr || type == kXor || type == kArrow || type == kPlus ||
-          type == kMinus || type == kStar || type == kSlash || type == kLe || type == kGe || type == kLt ||
-          type == kGt || type == kEq || type == kNe || type == kOpenSquare;
-}
-
 static const char *FixedToStr(ETokType type)
 {
    if (type >= kFirstFixed && type <= kLastFixed) {
@@ -390,9 +390,11 @@ static const char *FixedToStr(ETokType type)
 
 static int GetBinOpPrecedence(ETokType op)
 {
+   // From https://en.cppreference.com/w/cpp/language/operator_precedence.html
    // clang-format off
    switch (op) {
    case kArrow:
+   case kPeriod:
    case kOpenSquare:
       return 2;
    case kStar:
@@ -425,12 +427,12 @@ static int GetBinOpPrecedence(ETokType op)
    case kKwOr:
       return 15;
    default:
-      assert(false);
       return 0;
    }
    // clang-format on
 }
 
+constexpr int kHighestPrecedence = 1;
 constexpr int kLowestPrecedence = 100;
 
 static TNode *ParseExpr(TLexer &lex, TNodeTree &tree, const TNode *parent, int minPrecedence);
@@ -440,11 +442,9 @@ static TNode *
 ParseExprIncreasingPrecedence(TLexer &lex, TNodeTree &tree, TNode *left, const TNode *parent, int minPrecedence)
 {
    TToken tok = lex.Peek();
-   if (!IsBinOp(tok.fType))
-      return left;
-
    int precedence = GetBinOpPrecedence(tok.fType);
-   if (precedence > minPrecedence)
+   // Note: "precedence < highest" means it was not a BinOp
+   if (precedence < kHighestPrecedence || precedence > minPrecedence)
       return left;
 
    // Kinda workaround for treating '>' as an operator vs a close template.

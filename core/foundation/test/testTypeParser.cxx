@@ -65,6 +65,12 @@ TEST(TypeParser, Lex)
                  TToken::Ident("false"), kComma, TToken::Ident("A"), kComma, TToken::Ident("B"), kGt}));
    EXPECT_EQ(TLexer::Tokenize("Foo<\"bar\", 'F'>"),
              VT({TToken::Ident("Foo"), kLt, TToken::String("bar"), kComma, TToken::Char('F'), kGt}));
+
+   EXPECT_EQ(TLexer::Tokenize("T<\"a.b\">"), VT({TToken::Ident("T"), kLt, TToken::String("a.b"), kGt}));
+   EXPECT_EQ(TLexer::Tokenize("T<\">\">"), VT({TToken::Ident("T"), kLt, TToken::String(">"), kGt}));
+   EXPECT_EQ(TLexer::Tokenize("T<(a.b->b + c.d)>"),
+             VT({TToken::Ident("T"), kLt, kOpenRound, TToken::Ident("a"), kPeriod, TToken::Ident("b"), kArrow,
+                 TToken::Ident("b"), kPlus, TToken::Ident("c"), kPeriod, TToken::Ident("d"), kCloseRound, kGt}));
 }
 
 TEST(TypeParser, LexInvalidTypes)
@@ -296,6 +302,9 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(secondChild->fNextSibling->fNodeType, TNode::kExpr);
    EXPECT_EQ(secondChild->fNextSibling->fExpr.fStr, "2");
    EXPECT_EQ(secondChild->fNextSibling->fExpr.fType, TExpr::kLeaf);
+
+   tree = ParseType("T<(a.b->b + c.d)>");
+   ASSERT_EQ(tree.fNodes.size(), 11);
 }
 
 TEST(TypeParser, ShortType)
@@ -303,10 +312,20 @@ TEST(TypeParser, ShortType)
    EXPECT_EQ(ShortType("const int").Unwrap(), "int");
    EXPECT_EQ(ShortType("short*").Unwrap(), "short*");
    EXPECT_EQ(ShortType("const volatile class TNamed**").Unwrap(), "TNamed**");
+}
+
+TEST(TypeParser, ShortTypeExpr)
+{
    EXPECT_EQ(ShortType("std::conditional_t<(T > 32), int, float>").Unwrap(), "std::conditional_t<(T>32),int,float>");
    EXPECT_EQ(ShortType("std::conditional_t<(T < 32), int, float>").Unwrap(), "std::conditional_t<(T<32),int,float>");
    EXPECT_EQ(ShortType("std::conditional_t<(T < (A >= (32))), int, float>").Unwrap(),
              "std::conditional_t<(T<(A>=(32))),int,float>");
+   EXPECT_EQ(ShortType("T<(a->b)>").Unwrap(), "T<(a->b)>");
+   EXPECT_EQ(ShortType("T<(a.b->b + c.d)>").Unwrap(), "T<(a.b->b+c.d)>");
+}
+
+TEST(TypeParser, ShortTypeArray)
+{
    EXPECT_EQ(ShortType("T<v[2]+1>").Unwrap(), "T<v[2]+1>");
    EXPECT_EQ(ShortType("T<v[2 + a[1]]>").Unwrap(), "T<v[2+a[1]]>");
    EXPECT_EQ(ShortType("T<a[b[c+(d)]] - a[1]>").Unwrap(), "T<a[b[c+(d)]]-a[1]>");
