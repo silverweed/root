@@ -341,7 +341,7 @@ static void ParseCvList(TLexer &lex, TType &type)
 {
    TToken tok = lex.Peek();
    while (tok.fType == kKwConst || tok.fType == kKwVolatile) {
-      type.fQual |= (tok.fType == kKwConst) ? TType::kConst : TType::kVolatile;
+      type.fFlags |= (tok.fType == kKwConst) ? TType::kConst : TType::kVolatile;
       lex.Consume();
       tok = lex.Peek();
    }
@@ -574,12 +574,18 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree);
 
 static bool ParseTemplate(TLexer &lex, TNodeTree &tree, TNode &parentType)
 {
+   assert(parentType.fNodeType == TNode::kType);
+
    TToken tok = lex.Peek();
    if (tok.fType == kLt) {
       lex.Consume();
 
+      // Mark this class as templated so we know it even if we end up pushing no children (which can happen if
+      // it's something like Foo<>)
+      parentType.fType.fFlags |= TType::kTemplated;
+
       // Find out if we're pushing a type or an expression
-      tok = lex.Peek();
+      tok = lex.Peek(TLexer::kPeekForceSplitGt);
 
       while (tok.fType != kGt) {
          TNode::ENodeType childType = TNode::kType;
@@ -669,6 +675,8 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    ParseCvList(lex, type->fType);
    ParseNamespace(lex, type->fType);
    ParseTypeSpecifier(lex, *type);
+   // Parse cv list again to handle weird spellings like "class const Foo"
+   ParseCvList(lex, type->fType);
 
    // parse type name
    TToken tok = lex.Peek();
@@ -716,27 +724,32 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 
    if (node.fType.fIndirection == TType::EIndirection::kNone) {
       if (!(flags & kStripCV)) {
-         if (node.fType.fQual & TType::kConst)
+         if (node.fType.fFlags & TType::kConst)
             out << "const ";
-         if (node.fType.fQual & TType::kVolatile)
+         if (node.fType.fFlags & TType::kVolatile)
             out << "volatile ";
       }
       if (!(flags & kStripNamespace))
          out << node.fType.fNamespace << node.fType.fName;
    }
 
-   if (node.fFirstChild) {
-      if (node.fType.fIndirection == TType::EIndirection::kNone)
-         out << '<';
+   // Note that a templated type might have no children
+   if (node.fType.fFlags & TType::kTemplated)
+      out << '<';
 
+   if (node.fFirstChild) {
       for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
          PrintNode(out, *child, flags);
          if (child->fNextSibling)
             out << ',';
       }
+   }
 
-      if (node.fType.fIndirection == TType::EIndirection::kNone)
-         out << '>';
+   if (node.fType.fFlags & TType::kTemplated) {
+      out << '>';
+      if ((flags & kSpaceAfterClosingTemplate) && !node.fNextSibling && node.fParent &&
+          node.fParent->fNodeType == TNode::kType)
+         out << ' ';
    }
 
    if (node.fType.fIndirection != TType::EIndirection::kNone) {
@@ -747,9 +760,9 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
       if (!(flags & kStripPointers) && node.fType.fIndirection == TType::EIndirection::kPtr)
          out << "*";
 
-      if (!(flags & kStripCV) && node.fType.fQual & TType::kConst)
+      if (!(flags & kStripCV) && node.fType.fFlags & TType::kConst)
          out << " const";
-      if (!(flags & kStripCV) && node.fType.fQual & TType::kVolatile)
+      if (!(flags & kStripCV) && node.fType.fFlags & TType::kVolatile)
          out << " volatile";
    }
 }
@@ -879,6 +892,15 @@ std::ostream &operator<<(std::ostream &out, TExpr::EType type)
    case TExpr::kParens: out << "Parens"; return out;
    default: assert(false); return out;
    }
+}
+
+TNode *TNode::LastChild() const
+{
+   TNode *child = fFirstChild;
+   while (child && child->fNextSibling) {
+      child = child->fNextSibling;
+   }
+   return child;
 }
 
 void TNode::DropLastChild()

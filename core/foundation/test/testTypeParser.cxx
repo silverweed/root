@@ -108,7 +108,7 @@ TEST(TypeParser, ParseTypeSimple)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "int");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, 0);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("const int volatile");
@@ -116,7 +116,7 @@ TEST(TypeParser, ParseTypeSimple)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "int");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, TType::kConst | TType::kVolatile);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kConst | TType::kVolatile);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("const std::size_t");
@@ -124,7 +124,7 @@ TEST(TypeParser, ParseTypeSimple)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "size_t");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "std::");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, TType::kConst);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kConst);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
 }
 
@@ -135,12 +135,12 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "list");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "std::");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kTemplated);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[1].fType.fName, "int");
    EXPECT_EQ(tree.fNodes[1].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[1].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[1].fType.fFlags, 0);
    EXPECT_EQ(tree.fNodes[1].fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("::my::ns::Type<5> volatile");
@@ -148,7 +148,7 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "Type");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "::my::ns::");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, TType::kVolatile);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kVolatile|TType::kTemplated);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kExpr);
    EXPECT_EQ(tree.fNodes[1].fExpr.fType, TExpr::kLeaf);
@@ -159,7 +159,7 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "T");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kTemplated);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kExpr);
 
@@ -168,7 +168,7 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "Type");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "::");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kTemplated);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kExpr);
 
@@ -178,19 +178,19 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(root->fNodeType, TNode::kType);
    EXPECT_EQ(root->fType.fName, "");
    EXPECT_EQ(root->fType.fNamespace, "");
-   EXPECT_EQ(root->fType.fQual, 0);
+   EXPECT_EQ(root->fType.fFlags, 0);
    EXPECT_EQ(root->fType.fIndirection, TType::EIndirection::kPtr);
    const auto *firstChild = root->fFirstChild;
    ASSERT_EQ(firstChild->fNodeType, TNode::kType);
    EXPECT_EQ(firstChild->fType.fName, "");
    EXPECT_EQ(firstChild->fType.fNamespace, "");
-   EXPECT_EQ(firstChild->fType.fQual, TType::kConst);
+   EXPECT_EQ(firstChild->fType.fFlags, TType::kConst);
    EXPECT_EQ(firstChild->fType.fIndirection, TType::EIndirection::kPtr);
    const auto *secondChild = firstChild->fFirstChild;
    ASSERT_EQ(secondChild->fNodeType, TNode::kType);
    EXPECT_EQ(secondChild->fType.fName, "short");
    EXPECT_EQ(secondChild->fType.fNamespace, "");
-   EXPECT_EQ(secondChild->fType.fQual, 0);
+   EXPECT_EQ(secondChild->fType.fFlags, 0);
    EXPECT_EQ(secondChild->fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("int *const");
@@ -198,12 +198,12 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, TType::kConst);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kConst);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kPtr);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[1].fType.fName, "int");
    EXPECT_EQ(tree.fNodes[1].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[1].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[1].fType.fFlags, 0);
    EXPECT_EQ(tree.fNodes[1].fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("int const*");
@@ -211,12 +211,12 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, 0);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kPtr);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[1].fType.fName, "int");
    EXPECT_EQ(tree.fNodes[1].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[1].fType.fQual, TType::kConst);
+   EXPECT_EQ(tree.fNodes[1].fType.fFlags, TType::kConst);
    EXPECT_EQ(tree.fNodes[1].fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("int const&");
@@ -224,12 +224,12 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, 0);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kRef);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[1].fType.fName, "int");
    EXPECT_EQ(tree.fNodes[1].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[1].fType.fQual, TType::kConst);
+   EXPECT_EQ(tree.fNodes[1].fType.fFlags, TType::kConst);
    EXPECT_EQ(tree.fNodes[1].fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("double&&");
@@ -237,12 +237,12 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[0].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, 0);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kRvRef);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[1].fType.fName, "double");
    EXPECT_EQ(tree.fNodes[1].fType.fNamespace, "");
-   EXPECT_EQ(tree.fNodes[1].fType.fQual, 0);
+   EXPECT_EQ(tree.fNodes[1].fType.fFlags, 0);
    EXPECT_EQ(tree.fNodes[1].fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("volatile int **const");
@@ -251,19 +251,19 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(root->fNodeType, TNode::kType);
    EXPECT_EQ(root->fType.fName, "");
    EXPECT_EQ(root->fType.fNamespace, "");
-   EXPECT_EQ(root->fType.fQual, TType::kConst);
+   EXPECT_EQ(root->fType.fFlags, TType::kConst);
    EXPECT_EQ(root->fType.fIndirection, TType::EIndirection::kPtr);
    firstChild = root->fFirstChild;
    ASSERT_EQ(firstChild->fNodeType, TNode::kType);
    EXPECT_EQ(firstChild->fType.fName, "");
    EXPECT_EQ(firstChild->fType.fNamespace, "");
-   EXPECT_EQ(firstChild->fType.fQual, 0);
+   EXPECT_EQ(firstChild->fType.fFlags, 0);
    EXPECT_EQ(firstChild->fType.fIndirection, TType::EIndirection::kPtr);
    secondChild = firstChild->fFirstChild;
    ASSERT_EQ(secondChild->fNodeType, TNode::kType);
    EXPECT_EQ(secondChild->fType.fName, "int");
    EXPECT_EQ(secondChild->fType.fNamespace, "");
-   EXPECT_EQ(secondChild->fType.fQual, TType::kVolatile);
+   EXPECT_EQ(secondChild->fType.fFlags, TType::kVolatile);
    EXPECT_EQ(secondChild->fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("int volatile *const *const volatile");
@@ -272,19 +272,19 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(root->fNodeType, TNode::kType);
    EXPECT_EQ(root->fType.fName, "");
    EXPECT_EQ(root->fType.fNamespace, "");
-   EXPECT_EQ(root->fType.fQual, TType::kVolatile | TType::kConst);
+   EXPECT_EQ(root->fType.fFlags, TType::kVolatile | TType::kConst);
    EXPECT_EQ(root->fType.fIndirection, TType::EIndirection::kPtr);
    firstChild = root->fFirstChild;
    ASSERT_EQ(firstChild->fNodeType, TNode::kType);
    EXPECT_EQ(firstChild->fType.fName, "");
    EXPECT_EQ(firstChild->fType.fNamespace, "");
-   EXPECT_EQ(firstChild->fType.fQual, TType::kConst);
+   EXPECT_EQ(firstChild->fType.fFlags, TType::kConst);
    EXPECT_EQ(firstChild->fType.fIndirection, TType::EIndirection::kPtr);
    secondChild = firstChild->fFirstChild;
    ASSERT_EQ(secondChild->fNodeType, TNode::kType);
    EXPECT_EQ(secondChild->fType.fName, "int");
    EXPECT_EQ(secondChild->fType.fNamespace, "");
-   EXPECT_EQ(secondChild->fType.fQual, TType::kVolatile);
+   EXPECT_EQ(secondChild->fType.fFlags, TType::kVolatile);
    EXPECT_EQ(secondChild->fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("T<v[2]>");
@@ -343,4 +343,15 @@ TEST(TypeParser, ShortTypeArray)
    EXPECT_EQ(ShortType("T<v[2 + a[1]]>").Unwrap(), "T<v[2+a[1]]>");
    EXPECT_EQ(ShortType("T<a[b[c+(d>>2)]] - a[1]>").Unwrap(), "T<a[b[c+(d>>2)]]-a[1]>");
    EXPECT_EQ(ShortType("T<a[0][1] - b[(a[1]+2)][5]>").Unwrap(), "T<a[0][1]-b[(a[1]+2)][5]>");
+}
+
+TEST(TypeParser, PrintNodeFlags)
+{
+  auto tree = ParseType("A<B<C>>");
+  ASSERT_EQ(tree.fNodes.size(), 3);
+  EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "A<B<C> >");
+
+  tree = ParseType("A<B<C>, D<>>");
+  ASSERT_EQ(tree.fNodes.size(), 4);
+  EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "A<B<C>,D<> >");
 }

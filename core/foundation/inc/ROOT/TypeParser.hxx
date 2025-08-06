@@ -140,10 +140,11 @@ public:
 
 /// Data relative to a parsed type.
 struct TType {
-   enum ETypeQual {
+   enum ETypeFlags {
       kNone = 0,
       kConst = 0x1,
       kVolatile = 0x2,
+      kTemplated = 0x4,
    };
    enum class EIndirection {
       kNone,
@@ -154,7 +155,7 @@ struct TType {
 
    std::string fName;
    std::string fNamespace;
-   int fQual = 0;
+   int fFlags = 0;
    EIndirection fIndirection = EIndirection::kNone;
 };
 
@@ -198,6 +199,7 @@ struct TNode {
    // "forgets" about the last child, detaching it from the children list.
    // The node will stay allocated in the parent tree.
    void DropLastChild();
+   TNode *LastChild() const;
 };
 
 enum EPrintFlags {
@@ -206,6 +208,8 @@ enum EPrintFlags {
    kStripPointers = 0x2,
    kStripRefs = 0x4,
    kStripNamespace = 0x8,
+   // If true, consecutive closing templates will be spaced like "A<B<C> >" rather than "A<B<C>>"
+   kSpaceAfterClosingTemplate = 0x10,
 
    kStripPointersAndRefs = kStripPointers | kStripRefs,
 };
