@@ -27,8 +27,13 @@
 #include <string_view>
 #include <algorithm>
 #include <string>
+#include <regex>
 
 #include "TSpinLockGuard.h"
+#include <TError.h>
+
+#include <ROOT/TypeParser.hxx>
+#include <ROOT/StringUtils.hxx>
 
 using std::string, std::string_view, std::vector, std::set;
 
@@ -657,6 +662,7 @@ bool TClassEdit::IsDefAlloc(const char *allocname, const char *classname)
    if (a=="__default_alloc_template<true,0>")   return true;
    if (a=="__malloc_alloc_template<0>")         return true;
 
+   // FIXME: we should handle pmr::polymorphic_allocator
    constexpr static int alloclen = length("allocator<");
    if (a.compare(0,alloclen,"allocator<") != 0) {
       return false;
@@ -1352,6 +1358,195 @@ string TClassEdit::CleanType(const char *typeDesc, int mode, const char **tail)
    return result;
 }
 
+// DEBUG
+[[maybe_unused]]
+static std::string StringifyMode(int mode)
+{
+   std::vector<std::string> flags;
+   // clang-format off
+   if (mode & TClassEdit::kDropTrailStar) flags.push_back("kDropTrailStar");
+   if (mode & TClassEdit::kDropDefaultAlloc) flags.push_back("kDropDefaultAlloc");
+   if (mode & TClassEdit::kDropAlloc) flags.push_back("kDropAlloc");
+   if (mode & TClassEdit::kInnerClass) flags.push_back("kInnerClass");
+   if (mode & TClassEdit::kInnedMostClass) flags.push_back("kInnedMostClass");
+   if (mode & TClassEdit::kDropStlDefault) flags.push_back("kDropStlDefault");
+   if (mode & TClassEdit::kDropComparator) flags.push_back("kDropComparator");
+   if (mode & TClassEdit::kDropAllDefault) flags.push_back("kDropAllDefault");
+   if (mode & TClassEdit::kLong64) flags.push_back("kLong64");
+   if (mode & TClassEdit::kDropStd) flags.push_back("kDropStd");
+   if (mode & TClassEdit::kKeepOuterConst) flags.push_back("kKeepOuterConst");
+   if (mode & TClassEdit::kResolveTypedef) flags.push_back("kResolveTypedef");
+   if (mode & TClassEdit::kDropPredicate) flags.push_back("kDropPredicate");
+   if (mode & TClassEdit::kDropHash) flags.push_back("kDropHash");
+   // clang-format on
+   return ROOT::Join("|", flags);
+}
+
+static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, int mode)
+{
+   using namespace ROOT::Internal::TypeParsing;
+
+   if (node.fNodeType != TNode::kType)
+      return;
+
+   auto &type = node.fType;
+   const auto &name = type.fName;
+
+   // Gather info about the node
+   enum {
+      kArgNone,
+      kArgComparator,
+      kArgHashAndKeyEqual,
+   } stlArgKind = kArgNone;
+   enum {
+      kNoAlloc,
+      kAllocNonAssoc,
+      kAllocAssoc,
+   } stlAlloc = kNoAlloc;
+
+   if (name == "vector" || name == "deque" || name == "set" || name == "unordered_set" || name == "list" ||
+       name == "forward_list" || name == "multiset" || name == "unordered_multiset") {
+      stlAlloc = kAllocNonAssoc;
+   } else if (name == "map" || name == "unordered_map" || name == "multimap" || name == "unordered_multimap") {
+      stlAlloc = kAllocAssoc;
+   }
+
+   if (stlAlloc != kNoAlloc) {
+      if (name == "set" || name == "map" || name == "multiset" || name == "multimap") {
+         stlArgKind = kArgComparator;
+      } else if (name == "unordered_set" || name == "unordered_map" || name == "unordered_multiset" ||
+                 name == "unordered_multimap") {
+         stlArgKind = kArgHashAndKeyEqual;
+      }
+   }
+
+   // Setup implied mode flags
+   if (mode & TClassEdit::kDropComparator)
+      mode |= TClassEdit::kDropAlloc;
+
+   if (mode & (TClassEdit::kDropStlDefault | TClassEdit::kDropDefaultAlloc))
+      mode |= TClassEdit::kDropDefaultAlloc;
+
+   ///// Actual node manipulation starts here:
+
+   // Do "normalization" of certain types
+   {
+      auto it = type.fNamespace.find("__cxx11::");
+      if (it != std::string::npos)
+         type.fNamespace.erase(it, std::size("__cxx11::") - 1);
+
+      // Normalize std::string
+      static const std::regex basicStringRegex{
+         "(std::)?basic_string<char,(std::)?char_traits<char>(,(std::)?(pmr::polymorphic_)?allocator<char>)?\\s*>"};
+      const auto &fullName = StringifyNode(node, EPrintFlags::kStripCV);
+      if (std::regex_match(fullName, basicStringRegex)) {
+         type.fName = "string";
+         type.fFlags &= ~TType::kTemplated;
+         node.fFirstChild = nullptr;
+      }
+   }
+
+   if ((mode & TClassEdit::kDropDefaultAlloc) && (stlAlloc != kNoAlloc)) {
+      // For all supported classes, the allocator is always the last child.
+      TNode *lastChild = node.LastChild();
+
+      // number of children required to have an allocator
+      auto allocIdx = 2;
+      // associative collections have at least 2 non-alloc children (key + value)
+      allocIdx += (stlAlloc == kAllocAssoc);
+      // we might have a comparator in between...
+      allocIdx += (stlArgKind == kArgComparator);
+      // ...or an Hash and a KeyEqual
+      allocIdx += 2 * (stlArgKind == kArgHashAndKeyEqual);
+
+      assert(node.fNumChildren <= allocIdx);
+
+      bool shouldDrop = node.fNumChildren == allocIdx;
+      if (!(mode & TClassEdit::kDropAlloc)) {
+         auto allocName = StringifyNode(*lastChild, kStripCV);
+         if (stlAlloc == kAllocNonAssoc) {
+            auto containedTypeName = StringifyNode(*node.fFirstChild, kStripCV);
+            shouldDrop = TClassEdit::IsDefAlloc(allocName.c_str(), containedTypeName.c_str());
+         } else if (node.fNumChildren > 2) {
+            auto keyName = StringifyNode(*node.fFirstChild, kStripCV);
+            auto valName = StringifyNode(*node.fFirstChild->fNextSibling, kStripCV);
+            shouldDrop = TClassEdit::IsDefAlloc(allocName.c_str(), keyName.c_str(), valName.c_str());
+         }
+      }
+      if (shouldDrop)
+         node.DropLastChild();
+   }
+
+   // When it comes to "DropStlDefault", we have 3 categories of STL classes:
+   // - those with no default arguments, aside the allocator (vector, list, etc)
+   // - those with a Compare argument (ordered sets and maps):
+   //         template < class Key,
+   //                    class Compare = less<Key>,
+   //                    class Alloc = allocator<Key>
+   //                  > class {set,multiset}
+   //         template < class Key,
+   //                    class Val,
+   //                    class Compare = less<Key>,
+   //                    class Alloc = allocator<pair<Key, Val>>
+   //                  > class {map,multimap}
+   // - those with a Hash and EqualTo argument (unordered sets and maps):
+   //         template < class Key,
+   //                    class Hash = hash<Key>,
+   //                    class KeyEqual = equal_to<Key>,
+   //                    class Alloc = allocator<Key>
+   //                  > class unordered_{set,multiset}
+   //         template < class Key,
+   //                    class Val,
+   //                    class Hash = hash<Key>,
+   //                    class KeyEqual = equal_to<Key>,
+   //                    class Alloc = allocator<Key>
+   //                  > class unordered_{map,multimap}
+
+   if ((mode & TClassEdit::kDropComparator) && (stlArgKind == kArgComparator)) {
+      // Since DropComparator implies DropAlloc, we know the comparator, if there, is the last child.
+      if (node.fNumChildren == 2)
+         node.DropLastChild();
+   }
+
+   if ((mode & TClassEdit::kDropHash) && (stlArgKind == kArgHashAndKeyEqual)) {
+   }
+
+   if ((mode & TClassEdit::kDropStlDefault) && (stlArgKind != kArgNone)) {
+      assert(stlAlloc != kNoAlloc);
+
+      if ((stlArgKind == kArgComparator) && node.fNumChildren == 2) {
+         auto compName = StringifyNode(*node.LastChild(), kStripCV);
+         // The elem name is either the first child (non-associative containers) or the second child (associative)
+         auto elemName = StringifyNode(
+            (stlArgKind == kAllocNonAssoc) ? *node.fFirstChild : *node.fFirstChild->fNextSibling, kStripCV);
+         bool shouldDrop = TClassEdit::IsDefComp(compName.c_str(), elemName.c_str());
+         if (shouldDrop)
+            node.DropLastChild();
+      } else if (stlArgKind == kArgHashAndKeyEqual) {
+         // handle key equal first if needed
+         if (node.fNumChildren == 3) {
+            auto keyEqualName = StringifyNode(*node.LastChild(), kStripCV);
+            auto elemName = StringifyNode(
+               (stlArgKind == kAllocNonAssoc) ? *node.fFirstChild : *node.fFirstChild->fNextSibling, kStripCV);
+            bool shouldDrop = TClassEdit::IsDefPred(keyEqualName.c_str(), elemName.c_str());
+            if (shouldDrop)
+               node.DropLastChild();
+         }
+         if (node.fNumChildren == 2) {
+            auto hashName = StringifyNode(*node.LastChild(), kStripCV);
+            auto elemName = StringifyNode(
+               (stlArgKind == kAllocNonAssoc) ? *node.fFirstChild : *node.fFirstChild->fNextSibling, kStripCV);
+            bool shouldDrop = TClassEdit::IsDefHash(hashName.c_str(), elemName.c_str());
+            if (shouldDrop)
+               node.DropLastChild();
+         }
+      }
+   }
+
+   if ((mode & TClassEdit::kDropStd) && ROOT::StartsWith(type.fNamespace, "std::"))
+      type.fNamespace.erase(0, std::char_traits<char>::length("std::"));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
 /// Return the absolute type of typeDesc.
@@ -1361,13 +1556,145 @@ string TClassEdit::CleanType(const char *typeDesc, int mode, const char **tail)
 
 string TClassEdit::ShortType(const char *typeDesc, int mode)
 {
-   string answer;
+   using namespace ROOT::Internal::TypeParsing;
 
-   // get list of all arguments
-   if (typeDesc) {
-      TSplitType arglist(typeDesc, (EModType) mode);
-      arglist.ShortType(answer, mode);
+#define DEBUG_ENABLE_TIMER 0
+#define DEBUG_DUMP_DIFFERENCES 0
+#define DEBUG_DUMP_INPUT 0
+#define DEBUG_ENABLE_OLD 0
+#define DEBUG_ENABLE_NEW 1
+#define DEBUG_DUMP_ERRORS 0
+
+#if DEBUG_DUMP_INPUT
+   Info("ClassEdit_Input", "%s", typeDesc);
+#endif
+
+#if DEBUG_ENABLE_TIMER
+   struct Timer {
+      const char *fName;
+      std::chrono::time_point<std::chrono::high_resolution_clock> fStart;
+      bool fStopped = false;
+      Timer(const char *name) : fName(name), fStart(std::chrono::high_resolution_clock::now()) {}
+      void Stop()
+      {
+         if (fStopped)
+            return;
+         fStopped = true;
+         auto end = std::chrono::high_resolution_clock::now();
+         auto t = std::chrono::duration_cast<std::chrono::microseconds>(end - fStart);
+         Info("ClassEdit_Time", "%s took %ld microseconds", fName, t.count());
+      }
+      ~Timer() { Stop(); }
+   };
+#else
+   struct Timer { Timer(const char *) {} void Stop() {}};
+#endif
+
+   std::string answer;
+
+#if DEBUG_ENABLE_NEW
+   Timer timerNew("new");
+
+   auto tree = ParseType(typeDesc);
+   if (!tree.fErrors.empty()) {
+#if DEBUG_DUMP_ERRORS
+      Error("ClassEdit_Error", "Failed to parse type `%s`: %s", typeDesc, ROOT::Join("\n", tree.fErrors).c_str());
+#endif
+      return "";
    }
+
+   if (!tree.fRoot)
+      return "";
+
+   // kDropTrailStar    = 1<<0, /* remove trailing '*' */
+   // kDropDefaultAlloc = 1<<1, /* remove default allocators from STL containers */
+   // kDropAlloc        = 1<<2, /* remove all allocators from STL containers */
+   // kInnerClass       = 1<<3, /* return immediate inner class of an STL container */
+   // kInnedMostClass   = 1<<4, /* return innermost class of STL on an STL container */
+   // kDropStlDefault   = 1<<5, /* implies kDropDefaultAlloc */
+   // kDropComparator   = 1<<6, /* if the class has a comparator, drops BOTH the comparator and the Allocator */
+   // kDropAllDefault   = 1<<7, /* Drop default template parameter even in non STL classes */
+   // kLong64           = 1<<8, /* replace all 'long long' with Long64_t. */
+   // kDropStd          = 1<<9, /* Drop any std:: */
+   // kKeepOuterConst   = 1<<10,/* Make sure to keep the const keyword even outside the template parameters */
+   // kResolveTypedef   = 1<<11,/* Strip all typedef except Double32_t and co. */
+   // kDropPredicate    = 1<<12,/* Drop the predicate if applies to the collection */
+   // kDropHash         = 1<<13 /* Drop the hash if applies to the collection */
+
+   auto *type = tree.fRoot;
+   if (type->fNodeType != TNode::kType) {
+#if DEBUG_DUMP_ERRORS
+      Error("ClassEdit_Error", "Expression given is not a type.");
+#endif
+      return "";
+   }
+
+   // Handle modes that only manipulate the outermost node
+   if ((mode & (kDropTrailStar | kInnerClass | kInnedMostClass))) {
+      while (type->fType.fIndirection == TType::EIndirection::kPtr) {
+         type = type->fFirstChild;
+         assert(type->fNodeType == TNode::kType);
+      }
+   }
+
+   if (mode & kInnerClass) {
+      type = type->fFirstChild;
+   } else if ((mode & kInnedMostClass) && type) {
+      // NOTE: the original implementation of ShortType() did not care whether the template argument is a type or an
+      // expression, so we do the same. This means that "Foo<2, int>" will become "2".
+      auto firstChild = type->FirstNonScopedChild();
+      while (firstChild) {
+         firstChild = firstChild->FirstNonScopedChild();
+      }
+   }
+
+   const auto forEachNode = [](TNode *root, std::function<void(TNode *)> &&fn) {
+      std::vector<TNode *> toVisit;
+      toVisit.push_back(root);
+      do {
+         TNode *cur = toVisit.back();
+         toVisit.pop_back();
+         for (TNode *child = cur->fFirstChild; child; child = child->fNextSibling)
+            toVisit.push_back(child);
+
+         fn(cur);
+      } while (!toVisit.empty());
+   };
+
+   forEachNode(type, [mode](TNode *cur) { ShortTypeHandleSingleNode(*cur, mode); });
+
+   std::stringstream newAns;
+   int flags = EPrintFlags::kSpaceAfterClosingTemplate;
+   if (!(mode & kKeepOuterConst))
+      flags |= EPrintFlags::kStripCV;
+   if (type)
+      PrintNode(newAns, *type, flags);
+
+   answer = newAns.str();
+   timerNew.Stop();
+#endif
+
+#if DEBUG_ENABLE_OLD
+   string oldAnswer;
+   {
+      Timer timerOld("old");
+      // get list of all arguments
+      if (typeDesc) {
+         TSplitType arglist(typeDesc, (EModType)mode);
+         arglist.ShortType(oldAnswer, mode);
+      }
+   }
+   answer = oldAnswer;
+#endif
+
+#if DEBUG_ENABLE_OLD && DEBUG_ENABLE_NEW && DEBUG_DUMP_DIFFERENCES
+   if (strcmp("::_Storage<_Up,>", typeDesc) == 0) {
+   // if (newAns.str() != oldAnswer) {
+      Error("TClassEdit_Diff", "answer != oldAnswer!\n  mode: %s\n  orig: %s\n  new: `%s`\n  old: `%s`",
+            StringifyMode(mode).c_str(), typeDesc, newAns.str().c_str(), oldAnswer.c_str());
+      R__ASSERT(false);
+   }
+#endif
 
    return answer;
 }

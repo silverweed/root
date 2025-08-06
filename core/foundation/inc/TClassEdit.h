@@ -75,10 +75,10 @@ namespace TClassEdit {
 
    enum EModType {
       kNone             = 0,
-      kDropTrailStar    = 1<<0, /* remove trailing '*' */
+      kDropTrailStar    = 1<<0, /* remove all trailing '*' and '&' */
       kDropDefaultAlloc = 1<<1, /* remove default allocators from STL containers */
       kDropAlloc        = 1<<2, /* remove all allocators from STL containers */
-      kInnerClass       = 1<<3, /* return immediate inner class of an STL container */
+      kInnerClass       = 1<<3, /* return immediate inner class of an STL container (after removing '*' and '&' from the outer type) */
       kInnedMostClass   = 1<<4, /* return innermost class of STL on an STL container */
       kDropStlDefault   = 1<<5, /* implies kDropDefaultAlloc */
       kDropComparator   = 1<<6, /* if the class has a comparator, drops BOTH the comparator and the Allocator */
