@@ -316,6 +316,27 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes.size(), 11);
 }
 
+TEST(TypeParser, ParseFuncPtr)
+{
+  auto tree = ParseType("const int(*)(void)");
+  auto root = &tree.fNodes[0];
+  ASSERT_EQ(tree.fNodes.size(), 3);
+  ASSERT_EQ(root->fNodeType, TNode::kType);
+  EXPECT_EQ(root->fType.fName, "");
+  EXPECT_EQ(root->fType.fIndirection, TType::EIndirection::kFuncPtr);
+  EXPECT_EQ(root->fNumChildren, 2);
+  auto ret = root->fFirstChild;
+  ASSERT_EQ(ret->fNodeType, TNode::kType);
+  EXPECT_EQ(ret->fType.fName, "int");
+  EXPECT_EQ(ret->fType.fFlags, TType::kConst);
+  EXPECT_EQ(ret->fType.fIndirection, TType::EIndirection::kNone);
+  auto arg = ret->fNextSibling;
+  ASSERT_EQ(arg->fNodeType, TNode::kType);
+  EXPECT_EQ(arg->fType.fName, "void");
+  EXPECT_EQ(arg->fType.fFlags, 0);
+  EXPECT_EQ(arg->fType.fIndirection, TType::EIndirection::kNone);
+}
+
 TEST(TypeParser, ShortType)
 {
    EXPECT_EQ(ShortType("const int").Unwrap(), "int");
@@ -374,4 +395,9 @@ TEST(TypeParser, PrintNodeFlags)
    tree = ParseType("std::is_assignable<std::__future_base::_Result<void>*&,std::__future_base::_Result<void>*>");
    EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate),
              "std::is_assignable<std::__future_base::_Result<void>*&,std::__future_base::_Result<void>*>");
+}
+
+TEST(TypeParser, ShortTypeFnPtr)
+{
+  EXPECT_EQ(ShortType("const int(*)(void)").Unwrap(), "int(*)(void)");
 }

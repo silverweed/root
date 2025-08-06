@@ -167,7 +167,8 @@ struct TType {
       kNone,
       kRef,
       kPtr,
-      kRvRef,
+      kRvRef, // '&&'
+      kFuncPtr, // function pointer: first child is return type, other children are argument types
    };
 
    std::string fName;
@@ -247,7 +248,8 @@ enum EPrintFlags {
 /// Even though the tree is logically an N-ary tree, internally it is stored as a binary tree where each node points
 /// to its first children and its next sibling.
 struct TNodeTree {
-   // deque to keep pointers valid
+   // deque to keep pointers valid.
+   // The root is always fNodes[0].
    std::deque<TNode> fNodes;
    std::vector<std::string> fErrors;
 
@@ -256,7 +258,8 @@ struct TNodeTree {
 
    // Makes `node` a child of a new node wrapping it, then resets all data of the new wrapper node.
    // This doesn't invalidate the pointers to `node` (but makes them point to the "new" wrapper).
-   void WrapNode(TNode *&node);
+   // Note that this operation does not change the pointer to the root node, which remains fNodes[0].
+   void WrapNode(TNode *const node);
 
    void Print(std::ostream &out = std::cout, int flags = kNone) const;
    void PrintTreeDebug(std::ostream &out = std::cout) const;

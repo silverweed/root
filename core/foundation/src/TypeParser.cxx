@@ -358,22 +358,25 @@ void TNodeTree::AddChild(TNode *parent, TNode *newChild)
    }
 }
 
-void TNodeTree::WrapNode(TNode *&node)
+void TNodeTree::WrapNode(TNode *const node)
 {
    TNode wrapped = *node; // copy the node to wrap
    node->fType = {};
    node->fExpr = {};
    auto &newNode = fNodes.emplace_back(wrapped);
+   
    // Adjust links
    for (TNode *child = node->fFirstChild; child; child = child->fNextSibling)
       child->fParent = &newNode;
+   newNode.fNumChildren = node->fNumChildren;
    newNode.fParent = node;
    newNode.fNextSibling = nullptr;
    newNode.fFirstChild = node->fFirstChild;
    node->fFirstChild = &newNode;
+   node->fNumChildren = 1;
 }
 
-static TType::ETypeFlags TypeSpecifierKeywordToTypeFlag(ETokType type)
+static TType::ETypeFlags CvOrModifierKeywordToTypeFlag(ETokType type)
 {
    switch (type) {
    case kKwUnsigned: return TType::kUnsigned;
@@ -386,10 +389,10 @@ static TType::ETypeFlags TypeSpecifierKeywordToTypeFlag(ETokType type)
    }
 }
 
-static void ParseTypeSpecifierList(TLexer &lex, TType &type, bool onlyCv = false)
+static void ParseCvAndModifiers(TLexer &lex, TType &type, bool onlyCv = false)
 {
    TToken tok = lex.Peek();
-   auto flag = TypeSpecifierKeywordToTypeFlag(tok.fType);
+   auto flag = CvOrModifierKeywordToTypeFlag(tok.fType);
    while (flag) {
       if (onlyCv && !(flag & (TType::kConst | TType::kVolatile)))
          return;
@@ -399,13 +402,13 @@ static void ParseTypeSpecifierList(TLexer &lex, TType &type, bool onlyCv = false
       type.fFlags |= flag;
       lex.Consume();
       tok = lex.Peek();
-      flag = TypeSpecifierKeywordToTypeFlag(tok.fType);
+      flag = CvOrModifierKeywordToTypeFlag(tok.fType);
    }
 }
 
 static void ParseCvList(TLexer &lex, TType &type)
 {
-   ParseTypeSpecifierList(lex, type, true);
+   ParseCvAndModifiers(lex, type, true);
 }
 
 static std::string TypeFlagsToKeywords(int flags)
@@ -744,7 +747,7 @@ static void ParseRefsAndPtrs(TLexer &lex, TNodeTree &tree, TNode *type)
 
       // Note that we do NOT push the wrapped node as the new latest node until we're done with parsing ptrs and
       // refs, as each new ptr/ref refers to the outermost node of the new hierarchy.
-      ParseTypeSpecifierList(lex, type->fType);
+      ParseCvAndModifiers(lex, type->fType);
 
       tok = lex.Peek();
    }
@@ -769,6 +772,61 @@ static bool ParseTypeName(TLexer &lex, TNodeTree &tree, TNode *type)
    return true;
 }
 
+static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *type)
+{
+   TToken tok = lex.Peek();
+   if (tok.fType != kOpenRound)
+      return true;
+
+   lex.Consume();
+   tok = lex.Peek();
+
+   if (tok.fType != kStar) {
+      tree.fErrors.push_back("expected '*' in function pointer");
+      return false;
+   }
+
+   lex.Consume();
+   tok = lex.Peek();
+   if (tok.fType != kCloseRound) {
+      tree.fErrors.push_back("expected ')' in function pointer");
+      return false;
+   }
+
+   lex.Consume();
+   tok = lex.Peek();
+   if (tok.fType != kOpenRound) {
+      tree.fErrors.push_back("expected '(' in function pointer");
+      return false;
+   }
+
+   // The current type becomes the return type of the function pointer
+   tree.WrapNode(type);
+   
+   type->fType.fIndirection = TType::EIndirection::kFuncPtr;
+
+   lex.Consume();
+   tok = lex.Peek();
+   while (tok.fType != kCloseRound) {
+      TNode *arg = ParseTypeInternal(lex, tree);
+      if (!arg) {
+         tree.fErrors.push_back("failed to parse argument of function pointer");
+         return false;
+      }
+      tree.AddChild(type, arg);
+
+      tok = lex.Peek();
+      if (tok.fType == kComma) {
+         lex.Consume();
+         tok = lex.Peek();
+      }
+   }
+
+   lex.Consume();
+
+   return true;
+}
+
 static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
 {
    // A type should look something like this:
@@ -784,7 +842,7 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    // expr :: [unary-op] (number | string | ident) | "(" [exprs] ")" | expr [binop] expr
    TNode *type = tree.PushNode(TNode::kType);
    // Parse const/volatile/unsigned/short/long/etc (they can be in any order)
-   ParseTypeSpecifierList(lex, type->fType);
+   ParseCvAndModifiers(lex, type->fType);
    ParseNamespace(lex, type->fType);
    // Parse "class", "struct" and "enum" keywords
    ParseTypeSpecifier(lex, *type);
@@ -794,11 +852,13 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    if (!ParseTypeName(lex, tree, type))
       return nullptr;
 
+   ParseFunctionPtr(lex, tree, type);
+
    if (!ParseTemplate(lex, tree, *type))
       return nullptr;
 
-   // type specifiers may come before or after the type, so parse them again
-   ParseTypeSpecifierList(lex, type->fType);
+   // cv/modifiers may come before or after the type, so parse them again
+   ParseCvAndModifiers(lex, type->fType);
    ParseRefsAndPtrs(lex, tree, type);
 
    return type;
@@ -819,9 +879,23 @@ TNodeTree ParseType(std::string_view src)
    return res;
 }
 
+// flags is a bitmask of EPrintFlags
 static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 {
    assert(node.fNodeType == TNode::kType);
+
+   if (node.fType.fIndirection == TType::EIndirection::kFuncPtr) {
+      assert(node.fNumChildren > 0); // must have at least the return type
+      PrintTypeNode(out, *node.fFirstChild, flags);
+      out << "(*)(";
+      for (TNode *arg = node.fFirstChild->fNextSibling; arg; arg = arg->fNextSibling) {
+         PrintTypeNode(out, *arg, flags);
+         if (arg->fNextSibling)
+            out << ",";
+      }
+      out << ")";
+      return;
+   }
 
    if (node.fType.fIndirection == TType::EIndirection::kNone) {
       int nodeFlags = node.fType.fFlags;
@@ -868,9 +942,9 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
          out << "*";
 
       if (!(flags & kStripCV) && node.fType.fFlags & TType::kConst)
-         out << " const";
+         out << "const";
       if (!(flags & kStripCV) && node.fType.fFlags & TType::kVolatile)
-         out << " volatile";
+         out << "volatile";
    }
 }
 
@@ -989,6 +1063,7 @@ void PrintTo(const TType::EIndirection &t, std::ostream *os)
    case TType::EIndirection::kRef: *os << "Ref"; return;
    case TType::EIndirection::kPtr: *os << "Ptr"; return;
    case TType::EIndirection::kRvRef: *os << "RvRef"; return;
+   case TType::EIndirection::kFuncPtr: *os << "FuncPtr"; return;
    }
 }
 
