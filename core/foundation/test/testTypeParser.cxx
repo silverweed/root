@@ -410,6 +410,10 @@ TEST(TypeParser, PrintNodeFlags)
 TEST(TypeParser, ShortTypeFnPtr)
 {
    EXPECT_EQ(ShortType("const int(*)(void)").Unwrap(), "int(*)(void)");
+   EXPECT_EQ(ShortType("void*(*)()").Unwrap(), "void*(*)()");
+   EXPECT_EQ(ShortType("void*(**[])()").Unwrap(), "void*(**[])()");
+   EXPECT_EQ(ShortType("Foo<void>*(*&&)(Bar*[],Baz<>)").Unwrap(), "Foo<void>*(*&&)(Bar*[],Baz<>)");
+   EXPECT_EQ(ShortType("A<B>(*)(Foo, Bar<2>)").Unwrap(), "A<B>(*)(Foo,Bar<2>)");
    EXPECT_EQ(ShortType("::__untag_result<__deduce_visit_result<type-parameter-1-0>(*)(type-parameter-1-1)>").Unwrap(),
              "::__untag_result<__deduce_visit_result<type-parameter-1-0>(*)(type-parameter-1-1)>");
    EXPECT_EQ(ShortType("_Multi_array<type-parameter-0-0(*)(type-parameter-0-1,type-parameter-0-3...),__dimensions...>")

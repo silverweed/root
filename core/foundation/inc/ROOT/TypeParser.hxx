@@ -256,7 +256,7 @@ struct TNodeTree {
    TNode *PushNode(TNode::ENodeType type);
    void AddChild(TNode *parent, TNode *child);
 
-   // Makes `node` a child of a new node wrapping it, then resets all data of the new wrapper node.
+   // Makes `node` a child of a new node wrapping it, then resets all data of the new wrapper node except the NodeType.
    // This doesn't invalidate the pointers to `node` (but makes them point to the "new" wrapper).
    // Note that this operation does not change the pointer to the root node, which remains fNodes[0].
    void WrapNode(TNode *const node);

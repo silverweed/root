@@ -52,8 +52,8 @@ bool TLexer::IsStartOfNumber(std::size_t pos) const
 
 static bool IsPartOfNumber(char ch)
 {
-   return IsDigit(ch) || ch == '.' || ch == 'f' || ch == 'F' || ch == 'e' || ch == 'E' || ch == 'x' ||
-          ch == 'X' || ch == 'p' || ch == 'P' || ch == 'o' || ch == 'O';
+   return IsDigit(ch) || ch == '.' || ch == 'f' || ch == 'F' || ch == 'e' || ch == 'E' || ch == 'x' || ch == 'X' ||
+          ch == 'p' || ch == 'P' || ch == 'o' || ch == 'O';
 }
 
 int TLexer::PeekFixed(std::size_t pos, std::size_t firstToCheck) const
@@ -371,7 +371,7 @@ void TNodeTree::WrapNode(TNode *const node)
    node->fType = {};
    node->fExpr = {};
    auto &newNode = fNodes.emplace_back(wrapped);
-   
+
    // Adjust links
    for (TNode *child = node->fFirstChild; child; child = child->fNextSibling)
       child->fParent = &newNode;
@@ -779,68 +779,6 @@ static bool ParseTypeName(TLexer &lex, TNodeTree &tree, TNode *type)
    return true;
 }
 
-static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *type)
-{
-   TToken tok = lex.Peek();
-   if (tok.fType != kOpenRound)
-      return true;
-
-   lex.Consume();
-   tok = lex.Peek();
-
-   if (tok.fType != kStar) {
-      tree.fErrors.push_back("expected '*' in function pointer");
-      return false;
-   }
-
-   lex.Consume();
-   tok = lex.Peek();
-   if (tok.fType != kCloseRound) {
-      tree.fErrors.push_back("expected ')' in function pointer");
-      return false;
-   }
-
-   lex.Consume();
-   tok = lex.Peek();
-   if (tok.fType != kOpenRound) {
-      tree.fErrors.push_back("expected '(' in function pointer");
-      return false;
-   }
-
-   // The current type becomes the return type of the function pointer
-   tree.WrapNode(type);
-   
-   type->fType.fIndirection = TType::EIndirection::kFuncPtr;
-
-   lex.Consume();
-   tok = lex.Peek();
-   while (tok.fType != kCloseRound) {
-      TNode *arg = ParseTypeInternal(lex, tree);
-      if (!arg) {
-         tree.fErrors.push_back("failed to parse argument of function pointer");
-         return false;
-      }
-
-      tok = lex.Peek();
-      if (kAcceptExtendedSyntax && tok.fType == kEllipsis) {
-         arg->fFlags |= TNode::kEllipsis;
-         lex.Consume();
-         tok = lex.Peek();
-      }
-
-      tree.AddChild(type, arg);
-
-      if (tok.fType == kComma) {
-         lex.Consume();
-         tok = lex.Peek();
-      }
-   }
-
-   lex.Consume();
-
-   return true;
-}
-
 static bool ParseTypeArray(TLexer &lex, TNodeTree &tree, TNode *type)
 {
    TToken tok = lex.Peek();
@@ -873,6 +811,81 @@ static bool ParseTypeArray(TLexer &lex, TNodeTree &tree, TNode *type)
    return true;
 }
 
+static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *&type)
+{
+   TToken tok = lex.Peek();
+   if (tok.fType != kOpenRound)
+      return true;
+
+   lex.Consume();
+   tok = lex.Peek();
+
+   if (tok.fType != kStar) {
+      tree.fErrors.push_back("expected '*' in function pointer");
+      return false;
+   }
+
+   // The current type becomes the return type of the function pointer
+   tree.WrapNode(type);
+   type->fType.fIndirection = TType::EIndirection::kFuncPtr;
+
+   lex.Consume();
+   tok = lex.Peek();
+   // handle pointers, refs and arrays of function pointers.
+   // We don't do much semantic validation here, so we will happily parse illegal ref-to-ref, ptr-to-ref and so on.
+   while (tok.fType == kStar || tok.fType == kAnd || tok.fType == kAndAnd) {
+      lex.Consume();
+      tree.WrapNode(type);
+      type->fType.fIndirection = TokTypeToIndirection(tok.fType);
+      tok = lex.Peek();
+   }
+   ParseTypeArray(lex, tree, type);
+   // NOTE: if we find any indirection, we still need to finish parsing the function pointer, so pop back to it.
+   while (type->fType.fIndirection != TType::EIndirection::kFuncPtr)
+      type = type->fFirstChild;
+
+   tok = lex.Peek();
+   if (tok.fType != kCloseRound) {
+      tree.fErrors.push_back("expected ')' in function pointer");
+      return false;
+   }
+
+   lex.Consume();
+   tok = lex.Peek();
+   if (tok.fType != kOpenRound) {
+      tree.fErrors.push_back("expected '(' in function pointer");
+      return false;
+   }
+
+   lex.Consume();
+   tok = lex.Peek();
+   while (tok.fType != kCloseRound) {
+      TNode *arg = ParseTypeInternal(lex, tree);
+      if (!arg) {
+         tree.fErrors.push_back("failed to parse argument of function pointer");
+         return false;
+      }
+
+      tok = lex.Peek();
+      if (kAcceptExtendedSyntax && tok.fType == kEllipsis) {
+         arg->fFlags |= TNode::kEllipsis;
+         lex.Consume();
+         tok = lex.Peek();
+      }
+
+      tree.AddChild(type, arg);
+
+      if (tok.fType == kComma) {
+         lex.Consume();
+         tok = lex.Peek();
+      }
+   }
+
+   lex.Consume();
+
+   return true;
+}
+
 static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
 {
    // A type should look something like this:
@@ -901,12 +914,11 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    if (!ParseTemplate(lex, tree, *type))
       return nullptr;
 
-   ParseFunctionPtr(lex, tree, type);
-
    // cv/modifiers may come before or after the type, so parse them again
    ParseCvAndModifiers(lex, type->fType);
    ParseRefsAndPtrs(lex, tree, type);
 
+   ParseFunctionPtr(lex, tree, type);
    ParseTypeArray(lex, tree, type);
 
    return type;
@@ -932,19 +944,6 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 {
    assert(node.fNodeType == TNode::kType);
 
-   if (node.fType.fIndirection == TType::EIndirection::kFuncPtr) {
-      assert(node.fNumChildren > 0); // must have at least the return type
-      PrintNode(out, *node.fFirstChild, flags);
-      out << "(*)(";
-      for (TNode *arg = node.fFirstChild->fNextSibling; arg; arg = arg->fNextSibling) {
-         PrintNode(out, *arg, flags);
-         if (arg->fNextSibling)
-            out << ",";
-      }
-      out << ")";
-      return;
-   }
-
    if (node.fType.fIndirection == TType::EIndirection::kNone) {
       int nodeFlags = node.fType.fFlags;
       if (flags & kStripCV)
@@ -966,16 +965,18 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
    if (node.fType.fFlags & TType::kTemplated)
       out << '<';
 
-   if (node.fFirstChild) {
-      for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
-         PrintNode(out, *child, flags);
-         // In case of Array indirection nodes, the second node (if present) is the expression
-         // inside the brackets, so we want to print it later.
-         if (node.fType.fIndirection == TType::EIndirection::kArray)
-            break;
-         if (child->fNextSibling)
-            out << ',';
-      }
+   for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
+      PrintNode(out, *child, flags);
+      // In case of Array indirection nodes, the second node (if present) is the expression
+      // inside the brackets, so we want to print it later.
+      if (node.fType.fIndirection == TType::EIndirection::kArray)
+         break;
+      // In case of FuncPtr indirection nodes, all children after the first are the
+      // arguments of the function.
+      if (node.fType.fIndirection == TType::EIndirection::kFuncPtr)
+         break;
+      if (child->fNextSibling)
+         out << ',';
    }
 
    if (node.fType.fFlags & TType::kTemplated) {
@@ -983,6 +984,10 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
       if ((flags & kSpaceAfterClosingTemplate) && !node.fNextSibling && node.fParent &&
           node.fParent->fNodeType == TNode::kType && node.fParent->fType.fIndirection == TType::EIndirection::kNone)
          out << ' ';
+   }
+
+   if (node.fType.fIndirection == TType::EIndirection::kFuncPtr) {
+      out << "(*";
    }
 
    if (node.fType.fIndirection != TType::EIndirection::kNone) {
@@ -998,6 +1003,31 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
             PrintNode(out, *node.fFirstChild->fNextSibling, flags);
          }
          out << "]";
+      }
+
+      // If we are the outermost indirection of a function pointer, terminate the type by appending the arguments.
+      const TNode *fnPtr = &node;
+      while (fnPtr &&
+             !(fnPtr->fNodeType == TNode::kType && fnPtr->fType.fIndirection == TType::EIndirection::kFuncPtr)) {
+         fnPtr = fnPtr->fFirstChild;
+      }
+      if (fnPtr) {
+         // found the function pointer descendant, now check if we're the outermost indirection.
+         bool isOutermost = !node.fParent || node.fParent->fNodeType != TNode::kType;
+         if (!isOutermost) {
+            auto parInd = node.fParent->fType.fIndirection;
+            isOutermost = parInd != TType::EIndirection::kArray && parInd != TType::EIndirection::kRef &&
+                          parInd != TType::EIndirection::kPtr && parInd != TType::EIndirection::kRvRef;
+         }
+         if (isOutermost) {
+            out << ")(";
+            for (TNode *arg = fnPtr->fFirstChild->fNextSibling; arg; arg = arg->fNextSibling) {
+               PrintNode(out, *arg, flags);
+               if (arg->fNextSibling)
+                  out << ",";
+            }
+            out << ")";
+         }
       }
 
       if (!(flags & kStripCV) && node.fType.fFlags & TType::kConst)
