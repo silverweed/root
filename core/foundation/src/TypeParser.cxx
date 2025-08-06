@@ -18,22 +18,37 @@ static const std::size_t kNumKeywords = kFirstNonKeyword - kFirstFixed;
 
 // NOTE: must be in the same order as ETokType.
 // Strings with the same prefixes must come in order from longest to shortest.
-static const char *const kFixeds[] = {
-   "const",    "volatile", "not",    "and",  "or",    "bitand", "bitor", "xor", "class", "struct", "union", "enum",
-   "typename", "unsigned", "signed", "long", "short", "&&",     "||",    "&",   "|",     "^",      "~",     "++",
-   "--",       "->",       "+",      "-",    "*",     "/",      "::",    "<<",  ">>",    "<=",     ">=",    "<",
-   ">",        "==",       "!=",     "!",    ",",     "...",    ".",     "(",   ")",     "[",      "]"};
+static const char *const kFixeds[] = {"const",  "volatile", "not",    "and",   "or",   "bitand",   "bitor",
+                                      "xor",    "class",    "struct", "union", "enum", "typename", "unsigned",
+                                      "signed", "long",     "short",  "&&",    "||",   "&",        "|",
+                                      "^",      "~",        "++",     "--",    "->",   "+",        "-",
+                                      "*",      "/",        "%",      "::",    "<<",   ">>",       "<=>",
+                                      "<=",     ">=",       "<",      ">",     "==",   "!=",       "!",
+                                      ",",      "...",      ".",      "(",     ")",    "[",        "]"};
 static_assert(std::size(kFixeds) == kNumFixeds);
 
-static bool IsStartOfNumber(char ch)
+static bool IsDigit(char ch)
 {
-   return ch == '.' || (ch >= '0' && ch <= '9');
+   return ch >= '0' && ch <= '9';
+}
+
+bool TLexer::IsStartOfNumber(std::size_t pos) const
+{
+   char ch = fSrc[pos];
+   if (IsDigit(ch))
+      return true;
+
+   if (ch == '.' && pos < fSrc.size() - 1) {
+      char nxt = fSrc[pos + 1];
+      return IsDigit(nxt);
+   }
+   return false;
 }
 
 static bool IsPartOfNumber(char ch)
 {
-   return IsStartOfNumber(ch) || ch == 'f' || ch == 'F' || ch == 'e' || ch == 'E' || ch == 'x' || ch == 'X' ||
-          ch == 'p' || ch == 'P' || ch == 'o' || ch == 'O';
+   return IsDigit(ch) || ch == '.' || ch == 'f' || ch == 'F' || ch == 'e' || ch == 'E' || ch == 'x' ||
+          ch == 'X' || ch == 'p' || ch == 'P' || ch == 'o' || ch == 'O';
 }
 
 int TLexer::PeekFixed(std::size_t pos, std::size_t firstToCheck) const
@@ -120,7 +135,7 @@ TToken TLexer::PeekInternal(int flags)
 
       // number
       // NOTE: we check the latest token so we avoid returning "number" in cases like `x.y`
-      if (fLatestToken.fType != kIdent && IsStartOfNumber(ch)) {
+      if (fLatestToken.fType != kIdent && IsStartOfNumber(fCur)) {
          // NOTE: we don't really decode or validate the number, we simply skip ahead until the string looks like one.
          TToken token = {kNumber};
          token.fStr = ch;
@@ -134,6 +149,20 @@ TToken TLexer::PeekInternal(int flags)
 
       if (cur > srcSize)
          break;
+
+      // type-parameter
+      constexpr auto typeParLen = std::char_traits<char>::length("type-parameter-");
+      if (strncmp("type-parameter-", fSrc.data() + fCur, typeParLen) == 0) {
+         auto start = fCur;
+         cur += typeParLen;
+         while (cur < srcSize && (IsDigit(fSrc[cur]) || fSrc[cur] == '-'))
+            ++cur;
+         TToken tok;
+         tok.fType = kTypeParam;
+         tok.fStr = fSrc.substr(start, cur - start);
+         fNext = cur;
+         return tok;
+      }
 
       // fixed
       int fixedIdx = PeekFixed(cur - 1);
@@ -259,6 +288,13 @@ TToken TToken::Fixed(std::string_view fixed)
       }
    }
    assert(tok.fType >= kFirstFixed && tok.fType <= kLastFixed);
+   return tok;
+}
+
+TToken TToken::TypeParam(std::string_view str)
+{
+   TToken tok = {kTypeParam};
+   tok.fStr = str;
    return tok;
 }
 
@@ -420,7 +456,7 @@ static void ParseTypeSpecifier(TLexer &lex, TNode &type)
    (void)type;
 
    TToken tok = lex.Peek();
-   if (tok.fType == kKwClass || tok.fType == kKwStruct || tok.fType == kKwEnum) {
+   if (tok.fType == kKwClass || tok.fType == kKwStruct || tok.fType == kKwEnum || tok.fType == kKwTypename) {
       // We don't really care about the class/struct/enum specifier, so just eat it and go on.
       lex.Consume();
    }
@@ -451,6 +487,7 @@ static int GetBinOpPrecedence(ETokType op)
       return 2;
    case kStar:
    case kSlash:
+   case kPercent:
       return 5;
    case kPlus:
    case kMinus:
@@ -458,6 +495,8 @@ static int GetBinOpPrecedence(ETokType op)
    case kShiftLeft:
    case kShiftRight:
       return 7;
+   case kSpaceship:
+      return 8;
    case kLe:
    case kGe:
    case kLt:
@@ -660,9 +699,15 @@ static bool ParseTemplate(TLexer &lex, TNodeTree &tree, TNode &parentType)
          if (!newChild)
             return false;
 
+         tok = lex.Peek(TLexer::kPeekForceSplitGt);
+         if (tok.fType == kEllipsis) {
+            newChild->fFlags |= TNode::kEllipsis;
+            lex.Consume();
+            tok = lex.Peek(TLexer::kPeekForceSplitGt);
+         }
+
          tree.AddChild(&parentType, newChild);
 
-         tok = lex.Peek(TLexer::kPeekForceSplitGt);
          lex.Consume();
          if (tok.fType == kComma) {
             tok = lex.Peek();
@@ -710,7 +755,7 @@ static bool ParseTypeName(TLexer &lex, TNodeTree &tree, TNode *type)
    assert(type->fNodeType == TNode::kType);
 
    TToken tok = lex.Peek();
-   if (tok.fType != kIdent) {
+   if (tok.fType != kIdent && tok.fType != kTypeParam) {
       // type name might be omitted if we found some modifiers (e.g. "short").
       // In that case, transform the modifiers into the actual type name.
       if (!(type->fType.fFlags & TType::kModifiersMask)) {
@@ -876,6 +921,8 @@ void PrintNode(std::ostream &out, const TNode &node, int flags)
    } else {
       PrintExprNode(out, node, flags);
    }
+   if (node.fFlags & TNode::kEllipsis)
+      out << "...";
 }
 
 std::string StringifyNode(const TNode &node, int flags)

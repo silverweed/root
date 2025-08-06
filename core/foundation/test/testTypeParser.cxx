@@ -75,6 +75,13 @@ TEST(TypeParser, Lex)
                  TToken::Ident("b"), kPlus, TToken::Ident("c"), kPeriod, TToken::Ident("d"), kCloseRound, kGt}));
 }
 
+TEST(TypeParser, LexTypeParam)
+{
+   EXPECT_EQ(TLexer::Tokenize("Foo<bar, type-parameter-0-1, Baz<type-parameter-1-1> >"),
+             VT({TToken::Ident("Foo"), kLt, TToken::Ident("bar"), kComma, TToken::TypeParam("type-parameter-0-1"),
+                 kComma, TToken::Ident("Baz"), kLt, TToken::TypeParam("type-parameter-1-1"), kGt, kGt}));
+}
+
 TEST(TypeParser, LexInvalidTypes)
 {
    EXPECT_EQ(TLexer::Tokenize("std::vector<int"),
@@ -315,6 +322,7 @@ TEST(TypeParser, ShortType)
    EXPECT_EQ(ShortType("short*").Unwrap(), "short*");
    EXPECT_EQ(ShortType("const volatile class TNamed**").Unwrap(), "TNamed**");
    EXPECT_EQ(ShortType("unsigned long int").Unwrap(), "unsigned long int");
+   EXPECT_EQ(ShortType("T<C, Foo ...>").Unwrap(), "T<C,Foo...>");
 }
 
 TEST(TypeParser, ShortTypeExpr)
@@ -344,6 +352,13 @@ TEST(TypeParser, ShortTypeArray)
    EXPECT_EQ(ShortType("T<v[2 + a[1]]>").Unwrap(), "T<v[2+a[1]]>");
    EXPECT_EQ(ShortType("T<a[b[c+(d>>2)]] - a[1]>").Unwrap(), "T<a[b[c+(d>>2)]]-a[1]>");
    EXPECT_EQ(ShortType("T<a[0][1] - b[(a[1]+2)][5]>").Unwrap(), "T<a[0][1]-b[(a[1]+2)][5]>");
+   EXPECT_EQ(ShortType("T<x[i]...>").Unwrap(), "T<x[i]...>");
+}
+
+TEST(TypeParser, ShortTypeParam)
+{
+   EXPECT_EQ(ShortType("T<type-parameter-0-0, C<int, type-parameter-1-1>>").Unwrap(),
+             "T<type-parameter-0-0,C<int,type-parameter-1-1>>");
 }
 
 TEST(TypeParser, PrintNodeFlags)

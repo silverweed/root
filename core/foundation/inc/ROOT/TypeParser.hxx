@@ -56,9 +56,11 @@ enum ETokType {
    kMinus,
    kStar,
    kSlash,
+   kPercent,
    kColonColon,
    kShiftLeft,
    kShiftRight,
+   kSpaceship,
    kLe,
    kGe,
    kLt,
@@ -74,6 +76,8 @@ enum ETokType {
    kOpenSquare,
    kCloseSquare,
    kLastFixed = kCloseSquare,
+   // A pseudo-identifier of the form "type-parameter-X-Y" appearing as an internal type in some occasions.
+   kTypeParam,
    kEOF,
 };
 
@@ -90,7 +94,8 @@ struct TToken {
    static TToken Char(char ch);
    static TToken String(std::string_view str);
    static TToken Number(std::string_view str);
-   static TToken Fixed(std::string_view fixed);
+   static TToken Fixed(std::string_view str);
+   static TToken TypeParam(std::string_view str);
 
    TToken() = default;
    TToken(ETokType type) : fType(type) {}
@@ -116,6 +121,7 @@ class TLexer final {
    // Returns the index inside kFixeds or -1 if not found
    int PeekFixed(std::size_t pos, std::size_t firstToCheck = 0) const;
    bool IsWordTerminator(std::size_t pos) const;
+   bool IsStartOfNumber(std::size_t pos) const;
    TToken PeekInternal(int flags);
 
 public:
@@ -198,14 +204,23 @@ struct TNode {
       kType,
       kExpr,
    };
+   enum ENodeFlags {
+     kNone = 0,
+     kEllipsis = 0x1,
+   };
+
    ENodeType fNodeType = kInvalid;
+
    int fNumChildren = 0;
    TNode *fFirstChild = nullptr;
    TNode *fNextSibling = nullptr;
    TNode *fParent = nullptr;
+
    // Note: fType and fExpr are mutually exclusive, but using a union makes this class non default constructible
    TType fType;
    TExpr fExpr;
+
+   int fFlags = 0;
 
    // "forgets" about the last child, detaching it from the children list.
    // The node will stay allocated in the parent tree.
