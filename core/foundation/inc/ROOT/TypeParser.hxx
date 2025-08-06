@@ -37,7 +37,7 @@ enum ETokType {
    kKwStruct,
    kKwUnion,
    kKwEnum,
-   kKwSizeof,
+   kKwTypename,
    kFirstNonKeyword,
    kAndAnd = kFirstNonKeyword,
    kOrOr,
@@ -63,6 +63,7 @@ enum ETokType {
    kNe,
    kNot,
    kComma,
+   kEllipsis,
    kPeriod,
    kOpenRound,
    kCloseRound,
@@ -186,12 +187,17 @@ struct TNode {
       kExpr,
    };
    ENodeType fNodeType = kInvalid;
+   int fNumChildren = 0;
    TNode *fFirstChild = nullptr;
    TNode *fNextSibling = nullptr;
    TNode *fParent = nullptr;
    // Note: fType and fExpr are mutually exclusive, but using a union makes this class non default constructible
    TType fType;
    TExpr fExpr;
+
+   // "forgets" about the last child, detaching it from the children list.
+   // The node will stay allocated in the parent tree.
+   void DropLastChild();
 };
 
 enum EPrintFlags {
@@ -229,6 +235,10 @@ struct TNodeTree {
 /// Parses a type string into a tree. This is not a full AST but rather a tree storing enough info to be able to
 /// manipulate and reconstruct the given type.
 TNodeTree ParseType(std::string_view src);
+
+/// \param flags A bitmask of EPrintFlags
+void PrintNode(std::ostream &out, const TNode &node, int flags = kNone);
+std::string StringifyNode(const TNode &node, int flags = kNone);
 
 ROOT::RResult<std::string> ShortType(std::string_view typeDesc);
 

@@ -19,10 +19,10 @@ static const std::size_t kNumKeywords = kFirstNonKeyword - kFirstFixed;
 // NOTE: must be in the same order as ETokType.
 // Strings with the same prefixes must come in order from longest to shortest.
 static const char *const kFixeds[] = {
-   "const", "volatile", "not", "and", "or", "bitand", "bitor", "xor", "class", "struct", "union",
-   "enum",  "sizeof",   "&&",  "||",  "&",  "|",      "^",     "~",   "++",    "--",     "->",
-   "+",     "-",        "*",   "/",   "::", "<<",     ">>",    "<=",  ">=",    "<",      ">",
-   "==",    "!=",       "!",   ",",   ".",  "(",      ")",     "[",   "]"};
+   "const", "volatile", "not", "and", "or",  "bitand", "bitor", "xor", "class", "struct", "union",
+   "enum",  "typename", "&&",  "||",  "&",   "|",      "^",     "~",   "++",    "--",     "->",
+   "+",     "-",        "*",   "/",   "::",  "<<",     ">>",    "<=",  ">=",    "<",      ">",
+   "==",    "!=",       "!",   ",",   "...", ".",      "(",     ")",   "[",     "]"};
 static_assert(std::size(kFixeds) == kNumFixeds);
 
 static bool IsStartOfNumber(char ch)
@@ -318,6 +318,7 @@ void TNodeTree::AddChild(TNode *parent, TNode *newChild)
             child = child->fNextSibling;
          child->fNextSibling = newChild;
       }
+      ++parent->fNumChildren;
    }
 }
 
@@ -709,8 +710,6 @@ TNodeTree ParseType(std::string_view src)
    return res;
 }
 
-static void PrintNode(std::ostream &out, const TNode &node, int flags);
-
 static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 {
    assert(node.fNodeType == TNode::kType);
@@ -761,22 +760,19 @@ static void PrintExprNode(std::ostream &out, const TNode &node, int flags)
 
    switch (node.fExpr.fType) {
    case TExpr::kLeaf:
-      assert(!node.fFirstChild);
+      assert(node.fNumChildren == 0);
       out << node.fExpr.fStr;
       break;
 
    case TExpr::kUnaryOp:
-      assert(node.fFirstChild);
-      assert(!node.fFirstChild->fNextSibling);
+      assert(node.fNumChildren == 1);
 
       out << node.fExpr.fStr;
       PrintExprNode(out, *node.fFirstChild, flags);
       break;
 
    case TExpr::kBinOp:
-      assert(node.fFirstChild);
-      assert(node.fFirstChild->fNextSibling);
-      assert(!node.fFirstChild->fNextSibling->fNextSibling);
+      assert(node.fNumChildren == 2);
 
       PrintExprNode(out, *node.fFirstChild, flags);
       out << node.fExpr.fStr;
@@ -798,13 +794,20 @@ static void PrintExprNode(std::ostream &out, const TNode &node, int flags)
    }
 }
 
-static void PrintNode(std::ostream &out, const TNode &node, int flags)
+void PrintNode(std::ostream &out, const TNode &node, int flags)
 {
    if (node.fNodeType == TNode::kType) {
       PrintTypeNode(out, node, flags);
    } else {
       PrintExprNode(out, node, flags);
    }
+}
+
+std::string StringifyNode(const TNode &node, int flags)
+{
+   std::stringstream ss;
+   PrintNode(ss, node, flags);
+   return ss.str();
 }
 
 void TNodeTree::Print(std::ostream &out, int flags) const
@@ -876,6 +879,23 @@ std::ostream &operator<<(std::ostream &out, TExpr::EType type)
    case TExpr::kParens: out << "Parens"; return out;
    default: assert(false); return out;
    }
+}
+
+void TNode::DropLastChild()
+{
+   if (fNumChildren < 2) {
+      fFirstChild = nullptr;
+      fNumChildren = 0;
+      return;
+   }
+
+   TNode *child = fFirstChild;
+   assert(child && child->fNextSibling);
+   while (child->fNextSibling->fNextSibling) {
+      child = child->fNextSibling;
+   }
+   child->fNextSibling = nullptr;
+   --fNumChildren;
 }
 
 } // namespace ROOT::Internal::TypeParsing
