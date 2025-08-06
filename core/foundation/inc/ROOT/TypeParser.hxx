@@ -111,7 +111,7 @@ void PrintTo(const TToken &t, std::ostream *os);
 
 /// Turns a string into a stream of tokens.
 /// This lexer is designed to work with "mostly well-formed" input, so it does only basic validation.
-class TLexer final {
+struct TLexer final {
    std::string_view fSrc;
    std::size_t fCur = 0;
    std::size_t fNext = 0;
@@ -124,7 +124,6 @@ class TLexer final {
    bool IsStartOfNumber(std::size_t pos) const;
    TToken PeekInternal(int flags);
 
-public:
    enum EPeekFlags {
       kNone = 0,
       // If true, lex '>>' as two separate '>' tokens.
@@ -169,6 +168,7 @@ struct TType {
       kPtr,
       kRvRef, // '&&'
       kFuncPtr, // function pointer: first child is return type, other children are argument types
+      kArray, // first child is the wrapped type, second (optional) child is an expression
    };
 
    std::string fName;

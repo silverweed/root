@@ -318,23 +318,23 @@ TEST(TypeParser, ParseTypeNested)
 
 TEST(TypeParser, ParseFuncPtr)
 {
-  auto tree = ParseType("const int(*)(void)");
-  auto root = &tree.fNodes[0];
-  ASSERT_EQ(tree.fNodes.size(), 3);
-  ASSERT_EQ(root->fNodeType, TNode::kType);
-  EXPECT_EQ(root->fType.fName, "");
-  EXPECT_EQ(root->fType.fIndirection, TType::EIndirection::kFuncPtr);
-  EXPECT_EQ(root->fNumChildren, 2);
-  auto ret = root->fFirstChild;
-  ASSERT_EQ(ret->fNodeType, TNode::kType);
-  EXPECT_EQ(ret->fType.fName, "int");
-  EXPECT_EQ(ret->fType.fFlags, TType::kConst);
-  EXPECT_EQ(ret->fType.fIndirection, TType::EIndirection::kNone);
-  auto arg = ret->fNextSibling;
-  ASSERT_EQ(arg->fNodeType, TNode::kType);
-  EXPECT_EQ(arg->fType.fName, "void");
-  EXPECT_EQ(arg->fType.fFlags, 0);
-  EXPECT_EQ(arg->fType.fIndirection, TType::EIndirection::kNone);
+   auto tree = ParseType("const int(*)(void)");
+   auto root = &tree.fNodes[0];
+   ASSERT_EQ(tree.fNodes.size(), 3);
+   ASSERT_EQ(root->fNodeType, TNode::kType);
+   EXPECT_EQ(root->fType.fName, "");
+   EXPECT_EQ(root->fType.fIndirection, TType::EIndirection::kFuncPtr);
+   EXPECT_EQ(root->fNumChildren, 2);
+   auto ret = root->fFirstChild;
+   ASSERT_EQ(ret->fNodeType, TNode::kType);
+   EXPECT_EQ(ret->fType.fName, "int");
+   EXPECT_EQ(ret->fType.fFlags, TType::kConst);
+   EXPECT_EQ(ret->fType.fIndirection, TType::EIndirection::kNone);
+   auto arg = ret->fNextSibling;
+   ASSERT_EQ(arg->fNodeType, TNode::kType);
+   EXPECT_EQ(arg->fType.fName, "void");
+   EXPECT_EQ(arg->fType.fFlags, 0);
+   EXPECT_EQ(arg->fType.fIndirection, TType::EIndirection::kNone);
 }
 
 TEST(TypeParser, ShortType)
@@ -344,6 +344,13 @@ TEST(TypeParser, ShortType)
    EXPECT_EQ(ShortType("const volatile class TNamed**").Unwrap(), "TNamed**");
    EXPECT_EQ(ShortType("unsigned long int").Unwrap(), "unsigned long int");
    EXPECT_EQ(ShortType("T<C, Foo ...>").Unwrap(), "T<C,Foo...>");
+
+   EXPECT_EQ(
+      ShortType("std::pmr::polymorphic_allocator<std::sub_match<__gnu_cxx::__normal_iterator<const "
+                "char*,std::basic_string<char,std::char_traits<char>,std::pmr::polymorphic_allocator<char> > > > >")
+         .Unwrap(),
+      "std::pmr::polymorphic_allocator<std::sub_match<__gnu_cxx::__normal_iterator<"
+      "char*,std::basic_string<char,std::char_traits<char>,std::pmr::polymorphic_allocator<char>>>>>");
 }
 
 TEST(TypeParser, ShortTypeExpr)
@@ -374,6 +381,9 @@ TEST(TypeParser, ShortTypeArray)
    EXPECT_EQ(ShortType("T<a[b[c+(d>>2)]] - a[1]>").Unwrap(), "T<a[b[c+(d>>2)]]-a[1]>");
    EXPECT_EQ(ShortType("T<a[0][1] - b[(a[1]+2)][5]>").Unwrap(), "T<a[0][1]-b[(a[1]+2)][5]>");
    EXPECT_EQ(ShortType("T<x[i]...>").Unwrap(), "T<x[i]...>");
+   EXPECT_EQ(ShortType("unsigned char[]").Unwrap(), "unsigned char[]");
+   EXPECT_EQ(ShortType("unsigned char[][2][]").Unwrap(), "unsigned char[][2][]");
+   EXPECT_EQ(ShortType("T<Foo<2>[3 + 4]>").Unwrap(), "T<Foo<2>[3+4]>");
 }
 
 TEST(TypeParser, ShortTypeParam)
@@ -399,5 +409,10 @@ TEST(TypeParser, PrintNodeFlags)
 
 TEST(TypeParser, ShortTypeFnPtr)
 {
-  EXPECT_EQ(ShortType("const int(*)(void)").Unwrap(), "int(*)(void)");
+   EXPECT_EQ(ShortType("const int(*)(void)").Unwrap(), "int(*)(void)");
+   EXPECT_EQ(ShortType("::__untag_result<__deduce_visit_result<type-parameter-1-0>(*)(type-parameter-1-1)>").Unwrap(),
+             "::__untag_result<__deduce_visit_result<type-parameter-1-0>(*)(type-parameter-1-1)>");
+   EXPECT_EQ(ShortType("_Multi_array<type-parameter-0-0(*)(type-parameter-0-1,type-parameter-0-3...),__dimensions...>")
+                .Unwrap(),
+             "_Multi_array<type-parameter-0-0(*)(type-parameter-0-1,type-parameter-0-3...),__dimensions...>");
 }

@@ -13,6 +13,11 @@
 
 namespace ROOT::Internal::TypeParsing {
 
+// This lexer+parser is designed to parse an "extended" version of C++ types that may show up in (and must be handled
+// by) TClassEdit::ShortType(). This flag is used to keep track of where that happens so that, if in the future this
+// code needs to be used elsewhere, we may toggle it off.
+static constexpr bool kAcceptExtendedSyntax = true;
+
 static constexpr std::size_t kNumFixeds = kLastFixed - kFirstFixed + 1;
 static const std::size_t kNumKeywords = kFirstNonKeyword - kFirstFixed;
 
@@ -151,17 +156,19 @@ TToken TLexer::PeekInternal(int flags)
          break;
 
       // type-parameter
-      constexpr auto typeParLen = std::char_traits<char>::length("type-parameter-");
-      if (strncmp("type-parameter-", fSrc.data() + fCur, typeParLen) == 0) {
-         auto start = fCur;
-         cur += typeParLen;
-         while (cur < srcSize && (IsDigit(fSrc[cur]) || fSrc[cur] == '-'))
-            ++cur;
-         TToken tok;
-         tok.fType = kTypeParam;
-         tok.fStr = fSrc.substr(start, cur - start);
-         fNext = cur;
-         return tok;
+      if (kAcceptExtendedSyntax) {
+         constexpr auto typeParLen = std::char_traits<char>::length("type-parameter-");
+         if (strncmp("type-parameter-", fSrc.data() + fCur, typeParLen) == 0) {
+            auto start = fCur;
+            cur += typeParLen;
+            while (cur < srcSize && (IsDigit(fSrc[cur]) || fSrc[cur] == '-'))
+               ++cur;
+            TToken tok;
+            tok.fType = kTypeParam;
+            tok.fStr = fSrc.substr(start, cur - start);
+            fNext = cur;
+            return tok;
+         }
       }
 
       // fixed
@@ -813,9 +820,16 @@ static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *type)
          tree.fErrors.push_back("failed to parse argument of function pointer");
          return false;
       }
-      tree.AddChild(type, arg);
 
       tok = lex.Peek();
+      if (kAcceptExtendedSyntax && tok.fType == kEllipsis) {
+         arg->fFlags |= TNode::kEllipsis;
+         lex.Consume();
+         tok = lex.Peek();
+      }
+
+      tree.AddChild(type, arg);
+
       if (tok.fType == kComma) {
          lex.Consume();
          tok = lex.Peek();
@@ -823,6 +837,38 @@ static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *type)
    }
 
    lex.Consume();
+
+   return true;
+}
+
+static bool ParseTypeArray(TLexer &lex, TNodeTree &tree, TNode *type)
+{
+   TToken tok = lex.Peek();
+   while (tok.fType == kOpenSquare) {
+      lex.Consume();
+      tok = lex.Peek();
+
+      tree.WrapNode(type);
+      type->fType.fIndirection = TType::EIndirection::kArray;
+
+      if (tok.fType != kCloseSquare) {
+         // Parse whatever is inside the brackets
+         TNode *expr = ParseExpr(lex, tree, type, kLowestPrecedence);
+         if (!expr) {
+            tree.fErrors.push_back("failed to parse expression inside array");
+            return false;
+         }
+         tree.AddChild(type, expr);
+         tok = lex.Peek();
+      }
+
+      if (tok.fType != kCloseSquare) {
+         tree.fErrors.push_back("unterminated array after type `" + type->fType.fName + "`");
+         return false;
+      }
+      lex.Consume();
+      tok = lex.Peek();
+   }
 
    return true;
 }
@@ -852,14 +898,16 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    if (!ParseTypeName(lex, tree, type))
       return nullptr;
 
-   ParseFunctionPtr(lex, tree, type);
-
    if (!ParseTemplate(lex, tree, *type))
       return nullptr;
+
+   ParseFunctionPtr(lex, tree, type);
 
    // cv/modifiers may come before or after the type, so parse them again
    ParseCvAndModifiers(lex, type->fType);
    ParseRefsAndPtrs(lex, tree, type);
+
+   ParseTypeArray(lex, tree, type);
 
    return type;
 }
@@ -874,7 +922,7 @@ TNodeTree ParseType(std::string_view src)
 
    // We should have parsed all tokens
    if (lex.Peek().fType != kEOF)
-      res.fErrors.push_back("trailing tokens after type");
+      res.fErrors.push_back("trailing tokens after type: `" + std::string(lex.fSrc.substr(lex.fCur)) + "`");
 
    return res;
 }
@@ -886,10 +934,10 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 
    if (node.fType.fIndirection == TType::EIndirection::kFuncPtr) {
       assert(node.fNumChildren > 0); // must have at least the return type
-      PrintTypeNode(out, *node.fFirstChild, flags);
+      PrintNode(out, *node.fFirstChild, flags);
       out << "(*)(";
       for (TNode *arg = node.fFirstChild->fNextSibling; arg; arg = arg->fNextSibling) {
-         PrintTypeNode(out, *arg, flags);
+         PrintNode(out, *arg, flags);
          if (arg->fNextSibling)
             out << ",";
       }
@@ -921,6 +969,10 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
    if (node.fFirstChild) {
       for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
          PrintNode(out, *child, flags);
+         // In case of Array indirection nodes, the second node (if present) is the expression
+         // inside the brackets, so we want to print it later.
+         if (node.fType.fIndirection == TType::EIndirection::kArray)
+            break;
          if (child->fNextSibling)
             out << ',';
       }
@@ -940,6 +992,13 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
          out << "&&";
       if (!(flags & kStripPointers) && node.fType.fIndirection == TType::EIndirection::kPtr)
          out << "*";
+      if (node.fType.fIndirection == TType::EIndirection::kArray) {
+         out << "[";
+         if (node.fNumChildren > 1) {
+            PrintNode(out, *node.fFirstChild->fNextSibling, flags);
+         }
+         out << "]";
+      }
 
       if (!(flags & kStripCV) && node.fType.fFlags & TType::kConst)
          out << "const";
@@ -962,15 +1021,15 @@ static void PrintExprNode(std::ostream &out, const TNode &node, int flags)
       assert(node.fNumChildren == 1);
 
       out << node.fExpr.fStr;
-      PrintExprNode(out, *node.fFirstChild, flags);
+      PrintNode(out, *node.fFirstChild, flags);
       break;
 
    case TExpr::kBinOp:
       assert(node.fNumChildren == 2);
 
-      PrintExprNode(out, *node.fFirstChild, flags);
+      PrintNode(out, *node.fFirstChild, flags);
       out << node.fExpr.fStr;
-      PrintExprNode(out, *node.fFirstChild->fNextSibling, flags);
+      PrintNode(out, *node.fFirstChild->fNextSibling, flags);
       // Special case: array subscript
       if (node.fExpr.fStr == "[")
          out << ']';
@@ -979,7 +1038,7 @@ static void PrintExprNode(std::ostream &out, const TNode &node, int flags)
    case TExpr::kParens:
       out << '(';
       for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
-         PrintExprNode(out, *child, flags);
+         PrintNode(out, *child, flags);
       }
       out << ')';
       break;
@@ -1064,6 +1123,7 @@ void PrintTo(const TType::EIndirection &t, std::ostream *os)
    case TType::EIndirection::kPtr: *os << "Ptr"; return;
    case TType::EIndirection::kRvRef: *os << "RvRef"; return;
    case TType::EIndirection::kFuncPtr: *os << "FuncPtr"; return;
+   case TType::EIndirection::kArray: *os << "Array"; return;
    }
 }
 
