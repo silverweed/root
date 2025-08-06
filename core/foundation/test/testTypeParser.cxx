@@ -148,7 +148,7 @@ TEST(TypeParser, ParseTypeNested)
    ASSERT_EQ(tree.fNodes[0].fNodeType, TNode::kType);
    EXPECT_EQ(tree.fNodes[0].fType.fName, "Type");
    EXPECT_EQ(tree.fNodes[0].fType.fNamespace, "::my::ns::");
-   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kVolatile|TType::kTemplated);
+   EXPECT_EQ(tree.fNodes[0].fType.fFlags, TType::kVolatile | TType::kTemplated);
    EXPECT_EQ(tree.fNodes[0].fType.fIndirection, TType::EIndirection::kNone);
    ASSERT_EQ(tree.fNodes[1].fNodeType, TNode::kExpr);
    EXPECT_EQ(tree.fNodes[1].fExpr.fType, TExpr::kLeaf);
@@ -188,9 +188,9 @@ TEST(TypeParser, ParseTypeNested)
    EXPECT_EQ(firstChild->fType.fIndirection, TType::EIndirection::kPtr);
    const auto *secondChild = firstChild->fFirstChild;
    ASSERT_EQ(secondChild->fNodeType, TNode::kType);
-   EXPECT_EQ(secondChild->fType.fName, "short");
+   EXPECT_EQ(secondChild->fType.fName, "");
    EXPECT_EQ(secondChild->fType.fNamespace, "");
-   EXPECT_EQ(secondChild->fType.fFlags, 0);
+   EXPECT_EQ(secondChild->fType.fFlags, TType::kShort);
    EXPECT_EQ(secondChild->fType.fIndirection, TType::EIndirection::kNone);
 
    tree = ParseType("int *const");
@@ -314,6 +314,7 @@ TEST(TypeParser, ShortType)
    EXPECT_EQ(ShortType("const int").Unwrap(), "int");
    EXPECT_EQ(ShortType("short*").Unwrap(), "short*");
    EXPECT_EQ(ShortType("const volatile class TNamed**").Unwrap(), "TNamed**");
+   EXPECT_EQ(ShortType("unsigned long int").Unwrap(), "unsigned long int");
 }
 
 TEST(TypeParser, ShortTypeExpr)
@@ -347,11 +348,15 @@ TEST(TypeParser, ShortTypeArray)
 
 TEST(TypeParser, PrintNodeFlags)
 {
-  auto tree = ParseType("A<B<C>>");
-  ASSERT_EQ(tree.fNodes.size(), 3);
-  EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "A<B<C> >");
+   auto tree = ParseType("A<B<C>>");
+   ASSERT_EQ(tree.fNodes.size(), 3);
+   EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "A<B<C> >");
 
-  tree = ParseType("A<B<C>, D<>>");
-  ASSERT_EQ(tree.fNodes.size(), 4);
-  EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "A<B<C>,D<> >");
+   tree = ParseType("A<B<C>, D<>>");
+   ASSERT_EQ(tree.fNodes.size(), 4);
+   EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "A<B<C>,D<> >");
+
+   tree = ParseType("std::is_assignable<std::__future_base::_Result<void>*&,std::__future_base::_Result<void>*>");
+   EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate),
+             "std::is_assignable<std::__future_base::_Result<void>*&,std::__future_base::_Result<void>*>");
 }

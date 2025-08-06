@@ -38,6 +38,10 @@ enum ETokType {
    kKwUnion,
    kKwEnum,
    kKwTypename,
+   kKwUnsigned,
+   kKwSigned,
+   kKwLong,
+   kKwShort,
    kFirstNonKeyword,
    kAndAnd = kFirstNonKeyword,
    kOrOr,
@@ -145,6 +149,13 @@ struct TType {
       kConst = 0x1,
       kVolatile = 0x2,
       kTemplated = 0x4,
+      // integer modifiers: https://en.cppreference.com/w/cpp/language/types.html#Modifiers
+      kSigned = 0x8,
+      kUnsigned = 0x10,
+      kShort = 0x20,
+      kLong = 0x40,
+      kLongLong = 0x80,
+      kModifiersMask = kSigned | kUnsigned | kShort | kLong | kLongLong,
    };
    enum class EIndirection {
       kNone,

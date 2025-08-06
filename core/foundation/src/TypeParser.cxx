@@ -19,10 +19,10 @@ static const std::size_t kNumKeywords = kFirstNonKeyword - kFirstFixed;
 // NOTE: must be in the same order as ETokType.
 // Strings with the same prefixes must come in order from longest to shortest.
 static const char *const kFixeds[] = {
-   "const", "volatile", "not", "and", "or",  "bitand", "bitor", "xor", "class", "struct", "union",
-   "enum",  "typename", "&&",  "||",  "&",   "|",      "^",     "~",   "++",    "--",     "->",
-   "+",     "-",        "*",   "/",   "::",  "<<",     ">>",    "<=",  ">=",    "<",      ">",
-   "==",    "!=",       "!",   ",",   "...", ".",      "(",     ")",   "[",     "]"};
+   "const",    "volatile", "not",    "and",  "or",    "bitand", "bitor", "xor", "class", "struct", "union", "enum",
+   "typename", "unsigned", "signed", "long", "short", "&&",     "||",    "&",   "|",     "^",      "~",     "++",
+   "--",       "->",       "+",      "-",    "*",     "/",      "::",    "<<",  ">>",    "<=",     ">=",    "<",
+   ">",        "==",       "!=",     "!",    ",",     "...",    ".",     "(",   ")",     "[",      "]"};
 static_assert(std::size(kFixeds) == kNumFixeds);
 
 static bool IsStartOfNumber(char ch)
@@ -337,14 +337,61 @@ void TNodeTree::WrapNode(TNode *&node)
    node->fFirstChild = &newNode;
 }
 
-static void ParseCvList(TLexer &lex, TType &type)
+static TType::ETypeFlags TypeSpecifierKeywordToTypeFlag(ETokType type)
+{
+   switch (type) {
+   case kKwUnsigned: return TType::kUnsigned;
+   case kKwSigned: return TType::kSigned;
+   case kKwLong: return TType::kLong;
+   case kKwShort: return TType::kShort;
+   case kKwConst: return TType::kConst;
+   case kKwVolatile: return TType::kVolatile;
+   default: return TType::kNone;
+   }
+}
+
+static void ParseTypeSpecifierList(TLexer &lex, TType &type, bool onlyCv = false)
 {
    TToken tok = lex.Peek();
-   while (tok.fType == kKwConst || tok.fType == kKwVolatile) {
-      type.fFlags |= (tok.fType == kKwConst) ? TType::kConst : TType::kVolatile;
+   auto flag = TypeSpecifierKeywordToTypeFlag(tok.fType);
+   while (flag) {
+      if (onlyCv && !(flag & (TType::kConst | TType::kVolatile)))
+         return;
+
+      if ((type.fFlags & TType::kLong) && flag == TType::kLong)
+         type.fFlags |= TType::kLongLong;
+      type.fFlags |= flag;
       lex.Consume();
       tok = lex.Peek();
+      flag = TypeSpecifierKeywordToTypeFlag(tok.fType);
    }
+}
+
+static void ParseCvList(TLexer &lex, TType &type)
+{
+   ParseTypeSpecifierList(lex, type, true);
+}
+
+static std::string TypeFlagsToKeywords(int flags)
+{
+   std::string out;
+
+   if (flags & TType::kConst)
+      out += "const ";
+   if (flags & TType::kVolatile)
+      out += "volatile ";
+   if (flags & TType::kSigned)
+      out += "signed ";
+   if (flags & TType::kUnsigned)
+      out += "unsigned ";
+   if (flags & TType::kLong)
+      out += "long ";
+   if (flags & TType::kLongLong) // LongLong implies Long, so we only print another "long"
+      out += "long ";
+   if (flags & TType::kShort)
+      out += "short ";
+
+   return out;
 }
 
 static void ParseNamespace(TLexer &lex, TType &type)
@@ -652,10 +699,29 @@ static void ParseRefsAndPtrs(TLexer &lex, TNodeTree &tree, TNode *type)
 
       // Note that we do NOT push the wrapped node as the new latest node until we're done with parsing ptrs and
       // refs, as each new ptr/ref refers to the outermost node of the new hierarchy.
-      ParseCvList(lex, type->fType);
+      ParseTypeSpecifierList(lex, type->fType);
 
       tok = lex.Peek();
    }
+}
+
+static bool ParseTypeName(TLexer &lex, TNodeTree &tree, TNode *type)
+{
+   assert(type->fNodeType == TNode::kType);
+
+   TToken tok = lex.Peek();
+   if (tok.fType != kIdent) {
+      // type name might be omitted if we found some modifiers (e.g. "short").
+      // In that case, transform the modifiers into the actual type name.
+      if (!(type->fType.fFlags & TType::kModifiersMask)) {
+         tree.fErrors.push_back("expected type name, found " + tok.ToString());
+         return false;
+      }
+   } else {
+      type->fType.fName = tok.fStr;
+      lex.Consume();
+   }
+   return true;
 }
 
 static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
@@ -672,25 +738,22 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    // exprs :: expr ["," exprs]
    // expr :: [unary-op] (number | string | ident) | "(" [exprs] ")" | expr [binop] expr
    TNode *type = tree.PushNode(TNode::kType);
-   ParseCvList(lex, type->fType);
+   // Parse const/volatile/unsigned/short/long/etc (they can be in any order)
+   ParseTypeSpecifierList(lex, type->fType);
    ParseNamespace(lex, type->fType);
+   // Parse "class", "struct" and "enum" keywords
    ParseTypeSpecifier(lex, *type);
    // Parse cv list again to handle weird spellings like "class const Foo"
    ParseCvList(lex, type->fType);
 
-   // parse type name
-   TToken tok = lex.Peek();
-   if (tok.fType != kIdent) {
-      tree.fErrors.push_back("expected type name, found " + tok.ToString());
+   if (!ParseTypeName(lex, tree, type))
       return nullptr;
-   }
-   type->fType.fName = tok.fStr;
-   lex.Consume();
 
    if (!ParseTemplate(lex, tree, *type))
       return nullptr;
 
-   ParseCvList(lex, type->fType);
+   // type specifiers may come before or after the type, so parse them again
+   ParseTypeSpecifierList(lex, type->fType);
    ParseRefsAndPtrs(lex, tree, type);
 
    return type;
@@ -698,8 +761,6 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
 
 TNodeTree ParseType(std::string_view src)
 {
-   // std::cout << src << "\n";
-
    TNodeTree res;
 
    TLexer lex{src};
@@ -707,13 +768,8 @@ TNodeTree ParseType(std::string_view src)
    ParseTypeInternal(lex, res);
 
    // We should have parsed all tokens
-   if (lex.Peek().fType != kEOF) {
+   if (lex.Peek().fType != kEOF)
       res.fErrors.push_back("trailing tokens after type");
-   }
-
-   // std::cout << "-------------\n";
-   // res.PrintTreeDebug();
-   // std::cout << "-------------\n";
 
    return res;
 }
@@ -723,14 +779,20 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
    assert(node.fNodeType == TNode::kType);
 
    if (node.fType.fIndirection == TType::EIndirection::kNone) {
-      if (!(flags & kStripCV)) {
-         if (node.fType.fFlags & TType::kConst)
-            out << "const ";
-         if (node.fType.fFlags & TType::kVolatile)
-            out << "volatile ";
+      int nodeFlags = node.fType.fFlags;
+      if (flags & kStripCV)
+         nodeFlags &= ~(TType::kConst | TType::kVolatile);
+
+      out << TypeFlagsToKeywords(nodeFlags);
+      if (node.fType.fName.empty() && (node.fType.fFlags & TType::kModifiersMask)) {
+         // Remove extra space if we have no explicit type name (so we print "short" and not "short ")
+         out.seekp(-1, out.cur);
       }
+
       if (!(flags & kStripNamespace))
-         out << node.fType.fNamespace << node.fType.fName;
+         out << node.fType.fNamespace;
+
+      out << node.fType.fName;
    }
 
    // Note that a templated type might have no children
@@ -748,7 +810,7 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
    if (node.fType.fFlags & TType::kTemplated) {
       out << '>';
       if ((flags & kSpaceAfterClosingTemplate) && !node.fNextSibling && node.fParent &&
-          node.fParent->fNodeType == TNode::kType)
+          node.fParent->fNodeType == TNode::kType && node.fParent->fType.fIndirection == TType::EIndirection::kNone)
          out << ' ';
    }
 
