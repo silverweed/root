@@ -52,8 +52,12 @@ bool TLexer::IsStartOfNumber(std::size_t pos) const
 
 static bool IsPartOfNumber(char ch)
 {
-   return IsDigit(ch) || ch == '.' || ch == 'f' || ch == 'F' || ch == 'e' || ch == 'E' || ch == 'x' || ch == 'X' ||
-          ch == 'p' || ch == 'P' || ch == 'o' || ch == 'O';
+   if (IsDigit(ch))
+      return true;
+
+   // make uppercase
+   ch -= (ch >= 'a' && ch <= 'z') * ('a' - 'A');
+   return ch == '.' || ch == 'F' || ch == 'E' || ch == 'X' || ch == 'P' || ch == 'O' || ch == 'U' || ch == 'L';
 }
 
 int TLexer::PeekFixed(std::size_t pos, std::size_t firstToCheck) const

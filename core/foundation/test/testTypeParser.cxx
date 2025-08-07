@@ -96,6 +96,8 @@ TEST(TypeParser, LexNumbers)
    EXPECT_EQ(TLexer::Tokenize("3.0f"), VT({{TToken::Number("3.0f")}}));
    EXPECT_EQ(TLexer::Tokenize("1e10 - 3.0f + 0x4.5p7"),
              VT({TToken::Number("1e10"), kMinus, TToken::Number("3.0f"), kPlus, TToken::Number("0x4.5p7")}));
+   EXPECT_EQ(TLexer::Tokenize("42ull"), VT({TToken::Number("42ull")}));
+   EXPECT_EQ(TLexer::Tokenize("0x42uL"), VT({TToken::Number("0x42uL")}));
 }
 
 TEST(TypeParser, LexStrings)
