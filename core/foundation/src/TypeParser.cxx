@@ -1023,8 +1023,10 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 
    if (node.fType.fFlags & TType::kTemplated) {
       out << '>';
+      // Put a space after the '>' only if we're about to close another template
       if ((flags & kSpaceAfterClosingTemplate) && !node.fNextSibling && node.fParent &&
-          node.fParent->fNodeType == TNode::kType && node.fParent->fType.fIndirection == TType::EIndirection::kNone)
+          node.fParent->fNodeType == TNode::kType && node.fParent->fType.fIndirection == TType::EIndirection::kNone &&
+          !(node.fParent->fFlags & TNode::kScoped))
          out << ' ';
    }
 

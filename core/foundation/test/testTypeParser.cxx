@@ -451,6 +451,12 @@ TEST(TypeParser, PrintNodeFlags)
    tree = ParseType("std::is_assignable<std::__future_base::_Result<void>*&,std::__future_base::_Result<void>*>");
    EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate),
              "std::is_assignable<std::__future_base::_Result<void>*&,std::__future_base::_Result<void>*>");
+
+   tree = ParseType("A<B<C>>::D");
+   EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "A<B<C> >::D");
+
+   tree = ParseType("typename enable_if<(N>1&&N%2==0),void>::type");
+   EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "enable_if<(N>1&&N%2==0),void>::type");
 }
 
 TEST(TypeParser, ShortTypeFnPtr)
