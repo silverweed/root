@@ -610,7 +610,6 @@ static TNode *ParseLeaf(TLexer &lex, TNodeTree &tree)
    TToken tok = lex.Peek();
 
    // We consider the unary operator as having the lowest possible precedence.
-   // (Note that we don't really care about its precedence).
    if (IsUnaryOp(tok.fType)) {
       lex.Consume();
       expr = tree.PushNode(TNode::kExpr);
@@ -654,11 +653,9 @@ static TNode *ParseExpr(TLexer &lex, TNodeTree &tree, const TNode *parent, int m
 {
    TToken tok = lex.Peek();
 
-   // expr :: [unary-op] (number | string | ident) | "(" [expr] ")" | expr [binop] expr
    TNode *left = ParseLeaf(lex, tree);
-   if (!left) {
+   if (!left)
       return nullptr;
-   }
 
    while (left) {
       TNode *node = ParseExprIncreasingPrecedence(lex, tree, left, parent, minPrecedence);
@@ -1005,9 +1002,8 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 
    // If this is a Scoped node we already printed its first child, so skip it.
    TNode *const firstChild = (node.fFlags & TNode::kScoped) ? node.fFirstChild->fNextSibling : node.fFirstChild;
-   TNode *child = firstChild;
 
-   for (; child; child = child->fNextSibling) {
+   for (TNode *child = firstChild; child; child = child->fNextSibling) {
       PrintNode(out, *child, flags);
       // In case of Array indirection nodes, the second node (if present) is the expression
       // inside the brackets, so we want to print it later.

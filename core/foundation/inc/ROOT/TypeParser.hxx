@@ -106,7 +106,7 @@ struct TToken {
 
 bool operator==(const TToken &a, const TToken &b);
 std::ostream &operator<<(std::ostream &out, const TToken &t);
-// Required by GoogleTest
+// For GoogleTest
 void PrintTo(const TToken &t, std::ostream *os);
 
 /// Turns a string into a stream of tokens.
@@ -181,7 +181,7 @@ struct TType {
    EIndirection fIndirection = EIndirection::kNone;
 };
 
-// Required by GoogleTest
+// For GoogleTest
 void PrintTo(const TType::EIndirection &t, std::ostream *os);
 
 /// Data relative to a parsed expression.
@@ -196,7 +196,7 @@ struct TExpr {
       // has 0+ children
       kParens,
    };
-   EType fType;
+   EType fType = kLeaf;
    std::string fStr;
 };
 
@@ -232,6 +232,7 @@ struct TNode {
    TType fType;
    TExpr fExpr;
 
+   // Bitmask of ENodeFlags
    int fFlags = 0;
 
    // "forgets" about the last child, detaching it from the children list.
