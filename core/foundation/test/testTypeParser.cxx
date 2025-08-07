@@ -436,6 +436,9 @@ TEST(TypeParser, ShortTypeScoped)
    EXPECT_EQ(ShortType("Foo::Bar::baz").Unwrap(), "Foo::Bar::baz");
    EXPECT_EQ(ShortType("const Foo::Bar::baz*").Unwrap(), "Foo::Bar::baz*");
    EXPECT_EQ(ShortType("typename A<B[]>::B<int(*)(void)>:: C").Unwrap(), "A<B[]>::B<int(*)(void)>::C");
+
+   auto tree = ParseType("const Foo::Bar::baz*");
+   EXPECT_EQ(StringifyNode(tree.fNodes[0]), "const Foo::Bar::baz*");
 }
 
 TEST(TypeParser, PrintNodeFlags)

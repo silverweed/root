@@ -974,20 +974,27 @@ TNodeTree ParseType(std::string_view src)
    return res;
 }
 
+static void PrintTypeCvAndModifiers(std::ostream &out, const TNode &node, int flags)
+{
+   int nodeFlags = node.fType.fFlags;
+   if (flags & kStripCV)
+      nodeFlags &= ~(TType::kConst | TType::kVolatile);
+
+   out << TypeFlagsToKeywords(nodeFlags);
+   if (node.fType.fName.empty() && (node.fType.fFlags & TType::kModifiersMask)) {
+      // Remove extra space if we have no explicit type name (so we print "short" and not "short ")
+      out.seekp(-1, out.cur);
+   }
+}
+
 // flags is a bitmask of EPrintFlags
 static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 {
    assert(node.fNodeType == TNode::kType);
 
    if (node.fType.fIndirection == TType::EIndirection::kNone) {
-      int nodeFlags = node.fType.fFlags;
-      if (flags & kStripCV)
-         nodeFlags &= ~(TType::kConst | TType::kVolatile);
-
-      out << TypeFlagsToKeywords(nodeFlags);
-      if (node.fType.fName.empty() && (node.fType.fFlags & TType::kModifiersMask)) {
-         // Remove extra space if we have no explicit type name (so we print "short" and not "short ")
-         out.seekp(-1, out.cur);
+      if (!(node.fFlags & TNode::kScoped)) {
+         PrintTypeCvAndModifiers(out, node, flags);
       }
 
       if (!(flags & kStripNamespace))
@@ -1126,6 +1133,7 @@ void PrintNode(std::ostream &out, const TNode &node, int flags)
 {
    if (node.fFlags & TNode::kScoped) {
       assert(node.fFirstChild);
+      PrintTypeCvAndModifiers(out, node, flags);
       PrintNode(out, *node.fFirstChild, flags);
       out << "::";
    }
