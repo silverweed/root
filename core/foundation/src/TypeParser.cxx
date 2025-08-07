@@ -194,15 +194,12 @@ TToken TLexer::PeekInternal(int flags)
          fixedIdx = PeekFixed(cur - 1, fixedIdx + 1);
       }
 
-      if (cur >= srcSize)
-         break;
-
       // identifier
-      do {
+      while (cur < srcSize) {
          if (IsWordTerminator(cur))
             break;
          ++cur;
-      } while (cur < srcSize);
+      }
 
       std::size_t identSize = cur - wordStart;
       TToken tok = TToken::Ident({fSrc.data() + wordStart, identSize});
@@ -225,14 +222,16 @@ TToken TLexer::Peek(int flags)
 
 void TLexer::Consume()
 {
-   fPrev = fCur;
+   fPrev[1] = fPrev[0];
+   fPrev[0] = fCur;
    fCur = fNext;
 }
 
 void TLexer::Rewind()
 {
    fNext = fCur;
-   fCur = fPrev;
+   fCur = fPrev[0];
+   fPrev[0] = fPrev[1];
 }
 
 std::vector<TToken> TLexer::Tokenize(std::string_view src)
@@ -370,6 +369,7 @@ void TNodeTree::WrapNode(TNode *const node)
    TNode wrapped = *node; // copy the node to wrap
    node->fType = {};
    node->fExpr = {};
+   node->fFlags = 0;
    auto &newNode = fNodes.emplace_back(wrapped);
 
    // Adjust links
@@ -564,7 +564,7 @@ ParseExprIncreasingPrecedence(TLexer &lex, TNodeTree &tree, TNode *left, const T
       return left;
 
    // Kinda workaround for treating '>' and '>>' as an operator vs a close template.
-   // We currently treat it as an operator if we're inside a parentheses operation
+   // We currently treat it as an operator if we're inside a parentheses operation.
    const bool isActuallyBinOp = ((tok.fType != kGt && tok.fType != kShiftRight) || IsInsideParensExpr(parent));
    if (!isActuallyBinOp)
       return left;
@@ -689,12 +689,18 @@ static bool ParseTemplate(TLexer &lex, TNodeTree &tree, TNode &parentType)
              tok.fType == kCharacter) {
             childType = TNode::kExpr;
          }
-         // special case: check if this is an array expression
+         // special case: check if this is an array expression.
+         // We consider it an expression rather than an array type depending on whether the bracket closes immediately
+         // (type) or not (expr). So in `T<v[1]>` v[1] is an expression but in `T<v[]>` v[] is a type.
          if (tok.fType == kIdent) {
             lex.Consume();
             tok = lex.Peek();
             if (tok.fType == kOpenSquare) {
-               childType = TNode::kExpr;
+               lex.Consume();
+               tok = lex.Peek();
+               if (tok.fType != kCloseSquare)
+                  childType = TNode::kExpr;
+               lex.Rewind();
             }
             lex.Rewind();
             tok = lex.Peek();
@@ -886,20 +892,51 @@ static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *&type)
    return true;
 }
 
+static bool ParseUnqualifiedType(TLexer &lex, TNodeTree &tree, TNode *type);
+
+static bool ParseScopedType(TLexer &lex, TNodeTree &tree, TNode *type)
+{
+   TToken tok = lex.Peek();
+   while (tok.fType == kColonColon) {
+      lex.Consume();
+
+      // If we have an inner type, the outer type gets "frozen" and all further modifications apply to the inner type.
+      // To do this we wrap the outer type into the inner type and go on.
+      // Note that in our node tree the outer type is the *child* of the inner type rather than the other way around.
+      const auto specifiers = type->fType.fFlags & (TType::kCvMask | TType::kModifiersMask);
+      tree.WrapNode(type);
+      type->fFlags |= TNode::kScoped;
+      // All parsed type specifiers actually belong to the inner type, so move them over.
+      type->fType.fFlags = specifiers;
+      type->fFirstChild->fType.fFlags &= ~(TType::kCvMask | TType::kModifiersMask);
+
+      if (!ParseUnqualifiedType(lex, tree, type))
+         return false;
+
+      tok = lex.Peek();
+   }
+   return true;
+}
+
+static bool ParseUnqualifiedType(TLexer &lex, TNodeTree &tree, TNode *type)
+{
+   if (!ParseTypeName(lex, tree, type))
+      return false;
+
+   if (!ParseTemplate(lex, tree, *type))
+      return false;
+
+   // Parse SuperType::SubType construct (also works for static variables etc)
+   if (!ParseScopedType(lex, tree, type))
+      return false;
+
+   return true;
+}
+
 static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
 {
-   // A type should look something like this:
-   //
-   // type :: [cv-list] [namespace] [elab-type-spec] ident [template] [cv-list] [refs-and-ptrs]
-   // cv-list :: const | volatile
-   // namespace :: [ident] "::" [namespace]
-   // elab-type-spec :: class | struct | enum
-   // refs-and-ptrs :: ("&" | "&&" | "*" [cv-list]) [refs-and-ptrs]
-   // template :: "<" [types | exprs] ">"
-   // types :: type ["," types]
-   // exprs :: expr ["," exprs]
-   // expr :: [unary-op] (number | string | ident) | "(" [exprs] ")" | expr [binop] expr
    TNode *type = tree.PushNode(TNode::kType);
+
    // Parse const/volatile/unsigned/short/long/etc (they can be in any order)
    ParseCvAndModifiers(lex, type->fType);
    ParseNamespace(lex, type->fType);
@@ -908,10 +945,7 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    // Parse cv list again to handle weird spellings like "class const Foo"
    ParseCvList(lex, type->fType);
 
-   if (!ParseTypeName(lex, tree, type))
-      return nullptr;
-
-   if (!ParseTemplate(lex, tree, *type))
+   if (!ParseUnqualifiedType(lex, tree, type))
       return nullptr;
 
    // cv/modifiers may come before or after the type, so parse them again
@@ -965,7 +999,11 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
    if (node.fType.fFlags & TType::kTemplated)
       out << '<';
 
-   for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
+   // If this is a Scoped node we already printed its first child, so skip it.
+   TNode *const firstChild = (node.fFlags & TNode::kScoped) ? node.fFirstChild->fNextSibling : node.fFirstChild;
+   TNode *child = firstChild;
+
+   for (; child; child = child->fNextSibling) {
       PrintNode(out, *child, flags);
       // In case of Array indirection nodes, the second node (if present) is the expression
       // inside the brackets, so we want to print it later.
@@ -1000,7 +1038,7 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
       if (node.fType.fIndirection == TType::EIndirection::kArray) {
          out << "[";
          if (node.fNumChildren > 1) {
-            PrintNode(out, *node.fFirstChild->fNextSibling, flags);
+            PrintNode(out, *firstChild->fNextSibling, flags);
          }
          out << "]";
       }
@@ -1009,9 +1047,14 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
       const TNode *fnPtr = &node;
       while (fnPtr &&
              !(fnPtr->fNodeType == TNode::kType && fnPtr->fType.fIndirection == TType::EIndirection::kFuncPtr)) {
+         bool isScoped = fnPtr->fFlags & TNode::kScoped;
          fnPtr = fnPtr->fFirstChild;
+         if (isScoped)
+            fnPtr = fnPtr->fNextSibling;
       }
       if (fnPtr) {
+         assert(!(fnPtr->fFlags & TNode::kScoped));
+
          // found the function pointer descendant, now check if we're the outermost indirection.
          bool isOutermost = !node.fParent || node.fParent->fNodeType != TNode::kType;
          if (!isOutermost) {
@@ -1079,6 +1122,12 @@ static void PrintExprNode(std::ostream &out, const TNode &node, int flags)
 
 void PrintNode(std::ostream &out, const TNode &node, int flags)
 {
+   if (node.fFlags & TNode::kScoped) {
+      assert(node.fFirstChild);
+      PrintNode(out, *node.fFirstChild, flags);
+      out << "::";
+   }
+
    if (node.fNodeType == TNode::kType) {
       PrintTypeNode(out, node, flags);
    } else {
@@ -1115,6 +1164,8 @@ static void PrintNodeDebug(std::ostream &out, const TNode &node, int indent)
          PrintTo(node.fType.fIndirection, &out);
          out << " to:";
       }
+      if (node.fType.fFlags & TType::kTemplated)
+         out << "<>";
    } else {
       out << node.fExpr.fType << " Expr: ";
       out << node.fExpr.fStr;

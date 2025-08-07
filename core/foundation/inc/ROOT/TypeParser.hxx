@@ -115,7 +115,9 @@ struct TLexer final {
    std::string_view fSrc;
    std::size_t fCur = 0;
    std::size_t fNext = 0;
-   std::size_t fPrev = 0;
+   // We need 2 tokens of lookahead to handle array expr/type ambiguities.
+   // fPrev[0] is the most recent token, fPrev[1] the least recent.
+   std::size_t fPrev[2] = {0};
    TToken fLatestToken = {};
 
    // Returns the index inside kFixeds or -1 if not found
@@ -142,8 +144,8 @@ struct TLexer final {
    TToken Peek(int flags = 0);
    /// Advances to the next token.
    void Consume();
-   /// Goes back to the previous token. The lexer only has 1 step of backtracking available, so this function
-   /// is idempotent and can't be used to rewind the stream multiple times.
+   /// Goes back to the previous token. The lexer only has 2 steps of backtracking available, so this function
+   /// may be called twice before it starts being idempotent.
    void Rewind();
 };
 
@@ -160,6 +162,8 @@ struct TType {
       kShort = 0x20,
       kLong = 0x40,
       kLongLong = 0x80,
+
+      kCvMask = kConst | kVolatile,
       kModifiersMask = kSigned | kUnsigned | kShort | kLong | kLongLong,
    };
    enum class EIndirection {
@@ -208,6 +212,13 @@ struct TNode {
    enum ENodeFlags {
      kNone = 0,
      kEllipsis = 0x1,
+     // All "scoped" nodes have a node as their first child that acts as their parent scope.
+     // This is for constructs such as `Foo<>::Bar`: the first child of Bar will be Foo and Bar will be Scoped.
+     // Note that for the top-level scope we have no way of distinguishing namespaces from types, so we will consider
+     // as a namespace anything that doesn't look unambiguously like a type:
+     //   Foo::Bar -> Foo is the namespace of Bar (Bar is not kScoped)
+     //   Foo<2>::Bar -> Foo is the parent scope type of Bar (Bar is kScoped)
+     kScoped = 0x2,
    };
 
    ENodeType fNodeType = kInvalid;

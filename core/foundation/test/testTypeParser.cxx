@@ -319,8 +319,8 @@ TEST(TypeParser, ParseTypeNested)
 TEST(TypeParser, ParseFuncPtr)
 {
    auto tree = ParseType("const int(*)(void)");
-   auto root = &tree.fNodes[0];
    ASSERT_EQ(tree.fNodes.size(), 3);
+   auto root = &tree.fNodes[0];
    ASSERT_EQ(root->fNodeType, TNode::kType);
    EXPECT_EQ(root->fType.fName, "");
    EXPECT_EQ(root->fType.fIndirection, TType::EIndirection::kFuncPtr);
@@ -335,6 +335,43 @@ TEST(TypeParser, ParseFuncPtr)
    EXPECT_EQ(arg->fType.fName, "void");
    EXPECT_EQ(arg->fType.fFlags, 0);
    EXPECT_EQ(arg->fType.fIndirection, TType::EIndirection::kNone);
+}
+
+TEST(TypeParser, ParseScoped)
+{
+   auto tree = ParseType("const Foo<>::Bar<V>::baz &");
+   ASSERT_EQ(tree.fNodes.size(), 5);
+   auto root = &tree.fNodes[0];
+   ASSERT_EQ(root->fNodeType, TNode::kType);
+   EXPECT_EQ(root->fFlags, 0);
+   EXPECT_EQ(root->fType.fName, "");
+   EXPECT_EQ(root->fType.fIndirection, TType::EIndirection::kRef);
+   EXPECT_EQ(root->fNumChildren, 1);
+   auto scoped = root->fFirstChild;
+   ASSERT_EQ(scoped->fNodeType, TNode::kType);
+   ASSERT_EQ(scoped->fNumChildren, 1);
+   EXPECT_EQ(scoped->fFlags, TNode::kScoped);
+   EXPECT_EQ(scoped->fType.fName, "baz");
+   EXPECT_EQ(scoped->fType.fFlags, TType::kConst);
+   EXPECT_EQ(scoped->fType.fIndirection, TType::EIndirection::kNone);
+   auto middle = scoped->fFirstChild;
+   ASSERT_EQ(middle->fNodeType, TNode::kType);
+   EXPECT_EQ(middle->fType.fName, "Bar");
+   EXPECT_EQ(middle->fType.fFlags, TType::kTemplated);
+   EXPECT_EQ(middle->fType.fIndirection, TType::EIndirection::kNone);
+   EXPECT_EQ(middle->fNumChildren, 2);
+   auto outer = middle->fFirstChild;
+   auto tmpArg = outer->fNextSibling;
+   ASSERT_EQ(tmpArg->fNodeType, TNode::kType);
+   EXPECT_EQ(tmpArg->fType.fName, "V");
+   EXPECT_EQ(tmpArg->fType.fFlags, 0);
+   EXPECT_EQ(tmpArg->fType.fIndirection, TType::EIndirection::kNone);
+   EXPECT_EQ(tmpArg->fNumChildren, 0);
+   ASSERT_EQ(outer->fNodeType, TNode::kType);
+   EXPECT_EQ(outer->fType.fName, "Foo");
+   EXPECT_EQ(outer->fType.fFlags, TType::kTemplated);
+   EXPECT_EQ(outer->fType.fIndirection, TType::EIndirection::kNone);
+   EXPECT_EQ(outer->fNumChildren, 0);
 }
 
 TEST(TypeParser, ShortType)
@@ -390,6 +427,13 @@ TEST(TypeParser, ShortTypeParam)
 {
    EXPECT_EQ(ShortType("T<type-parameter-0-0, C<int, type-parameter-1-1>>").Unwrap(),
              "T<type-parameter-0-0,C<int,type-parameter-1-1>>");
+}
+
+TEST(TypeParser, ShortTypeScoped)
+{
+   EXPECT_EQ(ShortType("Foo::Bar::baz").Unwrap(), "Foo::Bar::baz");
+   EXPECT_EQ(ShortType("const Foo::Bar::baz*").Unwrap(), "Foo::Bar::baz*");
+   EXPECT_EQ(ShortType("typename A<B[]>::B<int(*)(void)>:: C").Unwrap(), "A<B[]>::B<int(*)(void)>::C");
 }
 
 TEST(TypeParser, PrintNodeFlags)
