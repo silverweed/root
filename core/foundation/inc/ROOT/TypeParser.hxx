@@ -88,10 +88,14 @@ struct TToken {
    // - the string or character, for kString and kCharacter
    // - the number, for kNumber
    // - the error, for kInvalid
-   std::string fStr;
+   // IMPORTANT: note that this is not an owning string, and the Token is not meant to outlive the string given to
+   // the Lexer!
+   std::string_view fStr;
 
+   // Utility functions used by tests. All strings passed must have static lifetime or at least a lifetime greater
+   // than the token that they create.
    static TToken Ident(std::string_view str);
-   static TToken Char(char ch);
+   static TToken Char(std::string_view ch);
    static TToken String(std::string_view str);
    static TToken Number(std::string_view str);
    static TToken Fixed(std::string_view str);
@@ -185,7 +189,7 @@ struct TType {
       kArray,   // first child is the wrapped type, second (optional) child is an expression
    };
 
-   std::string fName;
+   std::string_view fName;
    std::string fNamespace;
    int fFlags = 0;
    EIndirection fIndirection = EIndirection::kNone;
@@ -207,7 +211,7 @@ struct TExpr {
       kParens,
    };
    EType fType = kLeaf;
-   std::string fStr;
+   std::string_view fStr;
 };
 
 std::ostream &operator<<(std::ostream &out, TExpr::EType type);
@@ -274,6 +278,7 @@ enum EPrintFlags {
 /// children depending on their nesting (see description in TExpr).
 /// Even though the tree is logically an N-ary tree, internally it is stored as a binary tree where each node points
 /// to its first children and its next sibling.
+/// VERY IMPORTANT NOTE: this structure can only be safely accessed as long as the parsed string is alive.
 struct TNodeTree {
    // deque to keep pointers valid.
    // The root is always fNodes[0].

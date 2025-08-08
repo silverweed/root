@@ -53,6 +53,34 @@ static FixedStr kFixeds[] = {
 #undef S
 static_assert(std::size(kFixeds) == kNumFixeds);
 
+// NOTE: not using std::isspace because the compiler is not always able to inline it
+static bool IsSpace(char ch)
+{
+   return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v';
+}
+
+/**
+ * \brief Creates a copy of a string with whitespaces at the beginning and end removed.
+ */
+[[maybe_unused]]
+static inline std::string_view Trim(std::string_view str)
+{
+   // Trim left
+   auto idx = 0u;
+   while (idx < str.size() && IsSpace(str[idx]))
+      ++idx;
+
+   str = str.substr(idx);
+
+   // Trim right
+   idx = 0u;
+   auto len = str.size();
+   while (idx < len && IsSpace(str[len - idx - 1]))
+      ++idx;
+
+   return str;
+}
+
 static bool IsDigit(char ch)
 {
    return ch >= '0' && ch <= '9';
@@ -131,11 +159,10 @@ TToken TLexer::PeekInternal(int flags)
       if (ch == '\'') {
          TToken tok = {};
          if (cur < srcSize) {
-            char character = fSrc[cur];
             ++cur;
             if (cur < srcSize && fSrc[cur] == '\'') {
                tok.fType = kCharacter;
-               tok.fStr = character;
+               tok.fStr = fSrc.substr(cur - 1, 1);
                ++cur;
             }
          }
@@ -168,11 +195,11 @@ TToken TLexer::PeekInternal(int flags)
       if (fLatestToken.fType != kIdent && IsStartOfNumber(fCur)) {
          // NOTE: we don't really decode or validate the number, we simply skip ahead until the string looks like one.
          TToken token = {kNumber};
-         token.fStr = ch;
+         auto start = fCur;
          while (cur < srcSize && IsPartOfNumber(fSrc[cur])) {
-            token.fStr += fSrc[cur];
             ++cur;
          }
+         token.fStr = fSrc.substr(start, cur - start);
          fNext = cur;
          return token;
       }
@@ -287,7 +314,7 @@ TToken TToken::Ident(std::string_view str)
    return tok;
 }
 
-TToken TToken::Char(char ch)
+TToken TToken::Char(std::string_view ch)
 {
    TToken tok = {kCharacter};
    tok.fStr = ch;
@@ -471,7 +498,7 @@ static void ParseNamespace(TLexer &lex, TType &type)
       lex.Consume();
       if (lex.Peek().fType == kColonColon) {
          type.fNamespace += tok.fStr;
-         assert(type.fNamespace == ROOT::Trim(type.fNamespace)); // we should not have leading or trailing whitespaces
+         assert(type.fNamespace == Trim(type.fNamespace)); // we should not have leading or trailing whitespaces
          tok = lex.Peek();
       } else {
          lex.Rewind();
@@ -631,7 +658,8 @@ ParseExprIncreasingPrecedence(TLexer &lex, TNodeTree &tree, TNode *left, const T
    const bool isArraySub = tok.fType == kOpenSquare;
    TNode *right = ParseExpr(lex, tree, binopExpr, isArraySub ? kLowestPrecedence : precedence);
    if (!right) {
-      tree.fErrors.push_back("failed to parse right-hand side of binary op '" + binopExpr->fExpr.fStr + "'");
+      tree.fErrors.push_back("failed to parse right-hand side of binary op '" + std::string(binopExpr->fExpr.fStr) +
+                             "'");
       return nullptr;
    }
 
@@ -664,7 +692,7 @@ static TNode *ParseLeaf(TLexer &lex, TNodeTree &tree)
       expr->fExpr.fType = TExpr::kUnaryOp;
       TNode *inner = ParseExpr(lex, tree, expr, kLowestPrecedence);
       if (!inner) {
-         tree.fErrors.push_back("failed to parse inner expression of unary op '" + expr->fExpr.fStr + "'");
+         tree.fErrors.push_back("failed to parse inner expression of unary op '" + std::string(expr->fExpr.fStr) + "'");
          return nullptr;
       }
       tree.AddChild(expr, inner);
@@ -698,8 +726,6 @@ static TNode *ParseLeaf(TLexer &lex, TNodeTree &tree)
 
 static TNode *ParseExpr(TLexer &lex, TNodeTree &tree, const TNode *parent, int minPrecedence)
 {
-   TToken tok = lex.Peek();
-
    TNode *left = ParseLeaf(lex, tree);
    if (!left)
       return nullptr;
@@ -855,7 +881,7 @@ static bool ParseTypeArray(TLexer &lex, TNodeTree &tree, TNode *type)
       }
 
       if (tok.fType != kCloseSquare) {
-         tree.fErrors.push_back("unterminated array after type `" + type->fType.fName + "`");
+         tree.fErrors.push_back("unterminated array after type `" + std::string(type->fType.fName) + "`");
          return false;
       }
       lex.Consume();

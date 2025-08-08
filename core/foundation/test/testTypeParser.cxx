@@ -66,7 +66,7 @@ TEST(TypeParser, Lex)
              VT({TToken::Ident("std"), kColonColon, TToken::Ident("enable_if"), kLt, TToken::Ident("true"), kOrOr,
                  TToken::Ident("false"), kComma, TToken::Ident("A"), kComma, TToken::Ident("B"), kGt}));
    EXPECT_EQ(TLexer::Tokenize("Foo<\"bar\", 'F'>"),
-             VT({TToken::Ident("Foo"), kLt, TToken::String("bar"), kComma, TToken::Char('F'), kGt}));
+             VT({TToken::Ident("Foo"), kLt, TToken::String("bar"), kComma, TToken::Char("F"), kGt}));
 
    EXPECT_EQ(TLexer::Tokenize("T<\"a.b\">"), VT({TToken::Ident("T"), kLt, TToken::String("a.b"), kGt}));
    EXPECT_EQ(TLexer::Tokenize("T<\">\">"), VT({TToken::Ident("T"), kLt, TToken::String(">"), kGt}));
@@ -107,7 +107,7 @@ TEST(TypeParser, LexStrings)
    EXPECT_EQ(TLexer::Tokenize("\" asd  \""), VT({TToken::String(" asd  ")}));
    EXPECT_EQ(TLexer::Tokenize("\"'\""), VT({TToken::String("'")}));
    EXPECT_EQ(TLexer::Tokenize("''"), VT({{kInvalid}}));
-   EXPECT_EQ(TLexer::Tokenize("' '"), VT({TToken::Char(' ')}));
+   EXPECT_EQ(TLexer::Tokenize("' '"), VT({TToken::Char(" ")}));
 }
 
 TEST(TypeParser, ParseTypeSimple)
