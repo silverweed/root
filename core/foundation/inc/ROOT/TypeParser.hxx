@@ -181,6 +181,7 @@ struct TType {
       kPtr,
       kRvRef,   // '&&'
       kFuncPtr, // function pointer: first child is return type, other children are argument types
+      kFunc,    // function type, like the argument of an std::function<>. Same structure as FuncPtr.
       kArray,   // first child is the wrapped type, second (optional) child is an expression
    };
 

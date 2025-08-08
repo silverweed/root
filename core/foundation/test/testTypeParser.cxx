@@ -398,6 +398,7 @@ TEST(TypeParser, ShortTypeExpr)
    EXPECT_EQ(ShortType("std::conditional_t<(T < 32), int, float>").Unwrap(), "std::conditional_t<(T<32),int,float>");
    EXPECT_EQ(ShortType("std::conditional_t<(T < (A >= (32))), int, float>").Unwrap(),
              "std::conditional_t<(T<(A>=(32))),int,float>");
+   EXPECT_EQ(ShortType("std::function<bool(std::vector<int>)>").Unwrap(), "std::function<bool(std::vector<int>)>");
    EXPECT_EQ(ShortType("T<2, *x>").Unwrap(), "T<2,*x>");
    EXPECT_EQ(ShortType("T<2, (x + 1 > 2)>").Unwrap(), "T<2,(x+1>2)>");
    EXPECT_EQ(ShortType("T<(a->b)>").Unwrap(), "T<(a->b)>");

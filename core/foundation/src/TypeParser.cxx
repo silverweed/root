@@ -845,6 +845,34 @@ static bool ParseTypeArray(TLexer &lex, TNodeTree &tree, TNode *type)
    return true;
 }
 
+static bool ParseFunctionArgList(TLexer &lex, TNodeTree &tree, TNode *type)
+{
+   TToken tok = lex.Peek();
+   while (tok.fType != kCloseRound) {
+      TNode *arg = ParseTypeInternal(lex, tree);
+      if (!arg)
+         return false;
+
+      tok = lex.Peek();
+      if (kAcceptExtendedSyntax && tok.fType == kEllipsis) {
+         arg->fFlags |= TNode::kEllipsis;
+         lex.Consume();
+         tok = lex.Peek();
+      }
+
+      tree.AddChild(type, arg);
+
+      if (tok.fType == kComma) {
+         lex.Consume();
+         tok = lex.Peek();
+      }
+   }
+
+   lex.Consume();
+
+   return true;
+}
+
 static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *&type)
 {
    TToken tok = lex.Peek();
@@ -855,8 +883,9 @@ static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *&type)
    tok = lex.Peek();
 
    if (tok.fType != kStar) {
-      tree.fErrors.push_back("expected '*' in function pointer");
-      return false;
+      // Might be a std::function-like template argument: bail out.
+      lex.Rewind();
+      return true;
    }
 
    // The current type becomes the return type of the function pointer
@@ -892,30 +921,35 @@ static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *&type)
    }
 
    lex.Consume();
-   tok = lex.Peek();
-   while (tok.fType != kCloseRound) {
-      TNode *arg = ParseTypeInternal(lex, tree);
-      if (!arg) {
-         tree.fErrors.push_back("failed to parse argument of function pointer");
-         return false;
-      }
-
-      tok = lex.Peek();
-      if (kAcceptExtendedSyntax && tok.fType == kEllipsis) {
-         arg->fFlags |= TNode::kEllipsis;
-         lex.Consume();
-         tok = lex.Peek();
-      }
-
-      tree.AddChild(type, arg);
-
-      if (tok.fType == kComma) {
-         lex.Consume();
-         tok = lex.Peek();
-      }
+   if (!ParseFunctionArgList(lex, tree, type)) {
+      tree.fErrors.push_back("failed to parse argument of function pointer");
+      return false;
    }
 
+   return true;
+}
+
+static bool ParseFunctionType(TLexer &lex, TNodeTree &tree, TNode *type)
+{
+   // parse constructs like 'bool(Foo)' (e.g. in std::function<bool(Foo)>)
+   TToken tok = lex.Peek();
+   if (tok.fType != kOpenRound)
+      return true;
+
    lex.Consume();
+   tok = lex.Peek();
+
+   // Since this function is called after ParseFunctionPtr we know we should not be parsing one.
+   assert(tok.fType != kStar);
+
+   // The current type becomes the return type of the function
+   tree.WrapNode(type);
+   type->fType.fIndirection = TType::EIndirection::kFunc;
+
+   if (!ParseFunctionArgList(lex, tree, type)) {
+      tree.fErrors.push_back("failed to parse argument of function");
+      return false;
+   }
 
    return true;
 }
@@ -981,6 +1015,7 @@ static TNode *ParseTypeInternal(TLexer &lex, TNodeTree &tree)
    ParseRefsAndPtrs(lex, tree, type);
 
    ParseFunctionPtr(lex, tree, type);
+   ParseFunctionType(lex, tree, type);
    ParseTypeArray(lex, tree, type);
 
    return type;
@@ -1051,9 +1086,10 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
       // inside the brackets, so we want to print it later.
       if (node.fType.fIndirection == TType::EIndirection::kArray)
          break;
-      // In case of FuncPtr indirection nodes, all children after the first are the
+      // In case of FuncPtr and Func indirection nodes, all children after the first are the
       // arguments of the function.
-      if (node.fType.fIndirection == TType::EIndirection::kFuncPtr)
+      if (node.fType.fIndirection == TType::EIndirection::kFuncPtr ||
+          node.fType.fIndirection == TType::EIndirection::kFunc)
          break;
       if (child->fNextSibling)
          out << ',';
@@ -1068,11 +1104,20 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
          out << ' ';
    }
 
-   if (node.fType.fIndirection == TType::EIndirection::kFuncPtr) {
-      out << "(*";
-   }
-
    if (node.fType.fIndirection != TType::EIndirection::kNone) {
+      if (node.fType.fIndirection == TType::EIndirection::kFuncPtr) {
+         out << "(*";
+      }
+      if (node.fType.fIndirection == TType::EIndirection::kFunc) {
+         out << "(";
+         for (TNode *child = node.fFirstChild->fNextSibling; child; child = child->fNextSibling) {
+            PrintNode(out, *child, flags);
+            if (child->fNextSibling)
+               out << ",";
+         }
+         out << ")";
+      }
+
       if (!(flags & kStripRefs) && node.fType.fIndirection == TType::EIndirection::kRef)
          out << "&";
       if (!(flags & kStripRefs) && node.fType.fIndirection == TType::EIndirection::kRvRef)
@@ -1246,6 +1291,7 @@ void PrintTo(const TType::EIndirection &t, std::ostream *os)
    case TType::EIndirection::kPtr: *os << "Ptr"; return;
    case TType::EIndirection::kRvRef: *os << "RvRef"; return;
    case TType::EIndirection::kFuncPtr: *os << "FuncPtr"; return;
+   case TType::EIndirection::kFunc: *os << "Func"; return;
    case TType::EIndirection::kArray: *os << "Array"; return;
    }
 }
@@ -1287,7 +1333,8 @@ void TNode::DropLastChild()
    --fNumChildren;
 }
 
-TNode *TNode::FirstNonScopedChild() const {
+TNode *TNode::FirstNonScopedChild() const
+{
    TNode *c = fFirstChild;
    if (fFlags & kScoped)
       c = c->fNextSibling;
