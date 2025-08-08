@@ -153,9 +153,11 @@ struct TLexer final {
 struct TType {
    enum ETypeFlags {
       kNone = 0,
+
       kConst = 0x1,
       kVolatile = 0x2,
       kTemplated = 0x4,
+
       // integer modifiers: https://en.cppreference.com/w/cpp/language/types.html#Modifiers
       kSigned = 0x8,
       kUnsigned = 0x10,
@@ -163,16 +165,23 @@ struct TType {
       kLong = 0x40,
       kLongLong = 0x80,
 
+      // elaborate type specifiers
+      kExplicitStruct = 0x100,
+      kExplicitClass = 0x200,
+      kExplicitEnum = 0x400,
+      kExplicitTypename = 0x800,
+
       kCvMask = kConst | kVolatile,
       kModifiersMask = kSigned | kUnsigned | kShort | kLong | kLongLong,
+      kElabTypeSpecifiersMask = kExplicitStruct | kExplicitClass | kExplicitEnum,
    };
    enum class EIndirection {
       kNone,
       kRef,
       kPtr,
-      kRvRef, // '&&'
+      kRvRef,   // '&&'
       kFuncPtr, // function pointer: first child is return type, other children are argument types
-      kArray, // first child is the wrapped type, second (optional) child is an expression
+      kArray,   // first child is the wrapped type, second (optional) child is an expression
    };
 
    std::string fName;
@@ -210,15 +219,15 @@ struct TNode {
       kExpr,
    };
    enum ENodeFlags {
-     kNone = 0,
-     kEllipsis = 0x1,
-     // All "scoped" nodes have a node as their first child that acts as their parent scope.
-     // This is for constructs such as `Foo<>::Bar`: the first child of Bar will be Foo and Bar will be Scoped.
-     // Note that for the top-level scope we have no way of distinguishing namespaces from types, so we will consider
-     // as a namespace anything that doesn't look unambiguously like a type:
-     //   Foo::Bar -> Foo is the namespace of Bar (Bar is not kScoped)
-     //   Foo<2>::Bar -> Foo is the parent scope type of Bar (Bar is kScoped)
-     kScoped = 0x2,
+      kNone = 0,
+      kEllipsis = 0x1,
+      // All "scoped" nodes have a node as their first child that acts as their parent scope.
+      // This is for constructs such as `Foo<>::Bar`: the first child of Bar will be Foo and Bar will be Scoped.
+      // Note that for the top-level scope we have no way of distinguishing namespaces from types, so we will consider
+      // as a namespace anything that doesn't look unambiguously like a type:
+      //   Foo::Bar -> Foo is the namespace of Bar (Bar is not kScoped)
+      //   Foo<2>::Bar -> Foo is the parent scope type of Bar (Bar is kScoped)
+      kScoped = 0x2,
    };
 
    ENodeType fNodeType = kInvalid;
@@ -240,6 +249,7 @@ struct TNode {
    void DropLastChild();
    TNode *LastChild() const;
    TNode *FirstNonScopedChild() const;
+   TType &AsType();
 };
 
 enum EPrintFlags {
@@ -250,6 +260,8 @@ enum EPrintFlags {
    kStripNamespace = 0x8,
    // If true, consecutive closing templates will be spaced like "A<B<C> >" rather than "A<B<C>>"
    kSpaceAfterClosingTemplate = 0x10,
+   // If true, don't strip "class", "struct" or "enum" from the type
+   kKeepElabTypeSpecifier = 0x20,
 
    kStripPointersAndRefs = kStripPointers | kStripRefs,
 };

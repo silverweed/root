@@ -435,7 +435,7 @@ TEST(TypeParser, ShortTypeScoped)
 {
    EXPECT_EQ(ShortType("Foo::Bar::baz").Unwrap(), "Foo::Bar::baz");
    EXPECT_EQ(ShortType("const Foo::Bar::baz*").Unwrap(), "Foo::Bar::baz*");
-   EXPECT_EQ(ShortType("typename A<B[]>::B<int(*)(void)>:: C").Unwrap(), "A<B[]>::B<int(*)(void)>::C");
+   EXPECT_EQ(ShortType("typename A<B[]>::B<int(*)(void)>:: C").Unwrap(), "typename A<B[]>::B<int(*)(void)>::C");
 
    auto tree = ParseType("const Foo::Bar::baz*");
    EXPECT_EQ(StringifyNode(tree.fNodes[0]), "const Foo::Bar::baz*");
@@ -459,7 +459,7 @@ TEST(TypeParser, PrintNodeFlags)
    EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "A<B<C> >::D");
 
    tree = ParseType("typename enable_if<(N>1&&N%2==0),void>::type");
-   EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "enable_if<(N>1&&N%2==0),void>::type");
+   EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "typename enable_if<(N>1&&N%2==0),void>::type");
 }
 
 TEST(TypeParser, ShortTypeFnPtr)

@@ -465,14 +465,41 @@ static void ParseNamespace(TLexer &lex, TType &type)
    }
 }
 
+static TType::ETypeFlags TokTypeToTypeSpecifier(ETokType type)
+{
+   switch (type) {
+   case kKwClass: return TType::kExplicitClass;
+   case kKwStruct: return TType::kExplicitStruct;
+   case kKwEnum: return TType::kExplicitEnum;
+   case kKwTypename: return TType::kExplicitTypename;
+   default: return TType::kNone;
+   }
+}
+
+// `flags` is a bitmask of TType::ETypeFlags
+static std::string TypeSpecifierFlagsToString(int flags)
+{
+   std::stringstream ss;
+   if (flags & TType::kExplicitTypename)
+      ss << "typename ";
+   if (flags & TType::kExplicitClass)
+      ss << "class ";
+   if (flags & TType::kExplicitStruct)
+      ss << "struct ";
+   if (flags & TType::kExplicitEnum)
+      ss << "enum ";
+   return ss.str();
+}
+
 static void ParseTypeSpecifier(TLexer &lex, TNode &type)
 {
-   (void)type;
+   assert(type.fNodeType == TNode::kType);
 
    TToken tok = lex.Peek();
-   if (tok.fType == kKwClass || tok.fType == kKwStruct || tok.fType == kKwEnum || tok.fType == kKwTypename) {
-      // We don't really care about the class/struct/enum specifier, so just eat it and go on.
+   auto flag = TokTypeToTypeSpecifier(tok.fType);
+   if (flag) {
       lex.Consume();
+      type.fType.fFlags |= flag;
    }
 }
 
@@ -993,6 +1020,14 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
    assert(node.fNodeType == TNode::kType);
 
    if (node.fType.fIndirection == TType::EIndirection::kNone) {
+      int typeFlags = node.fType.fFlags;
+      if (!(flags & kKeepElabTypeSpecifier)) {
+         // NOTE: this preserves "typename"
+         typeFlags &= ~TType::kElabTypeSpecifiersMask;
+      }
+
+      out << TypeSpecifierFlagsToString(typeFlags);
+
       if (!(node.fFlags & TNode::kScoped)) {
          PrintTypeCvAndModifiers(out, node, flags);
       }
@@ -1257,6 +1292,12 @@ TNode *TNode::FirstNonScopedChild() const {
    if (fFlags & kScoped)
       c = c->fNextSibling;
    return c;
+}
+
+TType &TNode::AsType()
+{
+   assert(fNodeType == TNode::kType);
+   return fType;
 }
 
 } // namespace ROOT::Internal::TypeParsing
