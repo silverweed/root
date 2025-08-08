@@ -1008,7 +1008,7 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
       out << '<';
 
    // If this is a Scoped node we already printed its first child, so skip it.
-   TNode *const firstChild = (node.fFlags & TNode::kScoped) ? node.fFirstChild->fNextSibling : node.fFirstChild;
+   TNode *const firstChild = node.FirstNonScopedChild();
 
    for (TNode *child = firstChild; child; child = child->fNextSibling) {
       PrintNode(out, *child, flags);
@@ -1056,10 +1056,7 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
       const TNode *fnPtr = &node;
       while (fnPtr &&
              !(fnPtr->fNodeType == TNode::kType && fnPtr->fType.fIndirection == TType::EIndirection::kFuncPtr)) {
-         bool isScoped = fnPtr->fFlags & TNode::kScoped;
-         fnPtr = fnPtr->fFirstChild;
-         if (isScoped)
-            fnPtr = fnPtr->fNextSibling;
+         fnPtr = fnPtr->FirstNonScopedChild();
       }
       if (fnPtr) {
          assert(!(fnPtr->fFlags & TNode::kScoped));
@@ -1253,6 +1250,13 @@ void TNode::DropLastChild()
    }
    child->fNextSibling = nullptr;
    --fNumChildren;
+}
+
+TNode *TNode::FirstNonScopedChild() const {
+   TNode *c = fFirstChild;
+   if (fFlags & kScoped)
+      c = c->fNextSibling;
+   return c;
 }
 
 } // namespace ROOT::Internal::TypeParsing

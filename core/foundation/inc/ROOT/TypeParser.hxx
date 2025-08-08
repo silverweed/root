@@ -239,6 +239,7 @@ struct TNode {
    // The node will stay allocated in the parent tree.
    void DropLastChild();
    TNode *LastChild() const;
+   TNode *FirstNonScopedChild() const;
 };
 
 enum EPrintFlags {
