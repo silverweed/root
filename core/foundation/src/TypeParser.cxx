@@ -21,15 +21,36 @@ static constexpr bool kAcceptExtendedSyntax = true;
 static constexpr std::size_t kNumFixeds = kLastFixed - kFirstFixed + 1;
 static const std::size_t kNumKeywords = kFirstNonKeyword - kFirstFixed;
 
+struct FixedStr {
+   static constexpr std::size_t kMax = 32;
+
+   char fStr[kMax];
+   std::size_t fSize;
+
+   template <std::size_t N>
+   constexpr FixedStr(const char (&str)[N])
+   {
+      static_assert(N < kMax);
+      memcpy(fStr, str, N);
+      fSize = N - 1;
+      fStr[N] = 0;
+   }
+
+   constexpr inline operator const char *() const { return fStr; }
+   constexpr inline bool operator==(std::string_view other) const { return fSize == other.size() && fStr == other; }
+};
+
 // NOTE: must be in the same order as ETokType.
 // Strings with the same prefixes must come in order from longest to shortest.
-static const char *const kFixeds[] = {"const",  "volatile", "not",    "and",   "or",   "bitand",   "bitor",
-                                      "xor",    "class",    "struct", "union", "enum", "typename", "unsigned",
-                                      "signed", "long",     "short",  "&&",    "||",   "&",        "|",
-                                      "^",      "~",        "++",     "--",    "->",   "+",        "-",
-                                      "*",      "/",        "%",      "::",    "<<",   ">>",       "<=>",
-                                      "<=",     ">=",       "<",      ">",     "==",   "!=",       "!",
-                                      ",",      "...",      ".",      "(",     ")",    "[",        "]"};
+#define S(x) FixedStr(x)
+static FixedStr kFixeds[] = {
+   S("const"),  S("volatile"), S("not"),  S("and"),      S("or"),       S("bitand"), S("bitor"), S("xor"),   S("class"),
+   S("struct"), S("union"),    S("enum"), S("typename"), S("unsigned"), S("signed"), S("long"),  S("short"), S("&&"),
+   S("||"),     S("&"),        S("|"),    S("^"),        S("~"),        S("++"),     S("--"),    S("->"),    S("+"),
+   S("-"),      S("*"),        S("/"),    S("%"),        S("::"),       S("<<"),     S(">>"),    S("<=>"),   S("<="),
+   S(">="),     S("<"),        S(">"),    S("=="),       S("!="),       S("!"),      S(","),     S("..."),   S("."),
+   S("("),      S(")"),        S("["),    S("]")};
+#undef S
 static_assert(std::size(kFixeds) == kNumFixeds);
 
 static bool IsDigit(char ch)
@@ -64,11 +85,11 @@ int TLexer::PeekFixed(std::size_t pos, std::size_t firstToCheck) const
 {
    int idx = -1;
 
-   const std::size_t maxChars = fSrc.length() - pos;
+   // const std::size_t maxChars = fSrc.length() - pos;
    const char *const curWord = fSrc.data() + pos;
    for (std::size_t i = firstToCheck; i < std::size(kFixeds); ++i) {
-      std::size_t kwLen = strlen(kFixeds[i]);
-      if (strncmp(kFixeds[i], curWord, std::min(kwLen, maxChars)) == 0) {
+      std::size_t kwLen = kFixeds[i].fSize;
+      if (strncmp(kFixeds[i].fStr, curWord, kwLen) == 0) {
          idx = i;
          break;
       }
@@ -180,15 +201,14 @@ TToken TLexer::PeekInternal(int flags)
       while (fixedIdx >= 0) {
          const ETokType tokType = static_cast<ETokType>(kFirstFixed + fixedIdx);
          const bool mustSkipShiftRight = ((flags & kPeekForceSplitGt) && tokType == kShiftRight);
-         const char *keyword = kFixeds[fixedIdx];
-         auto kwLen = strlen(keyword);
-         const auto endPos = cur - 1 + kwLen;
+         const auto keyword = kFixeds[fixedIdx];
+         const auto endPos = cur - 1 + keyword.fSize;
          // For keyword tokens, check if it ends properly (e.g. "constf" should be an ident, not keyword "const").
          const auto terminatesProperly =
             (endPos == srcSize ||
              (endPos < srcSize && (fixedIdx >= (int)kFirstNonKeyword || IsWordTerminator(endPos))));
          if (!mustSkipShiftRight && terminatesProperly) {
-            cur += kwLen - 1;
+            cur += keyword.fSize - 1;
             fNext = cur;
             TToken tok;
             tok.fType = tokType;
@@ -292,7 +312,7 @@ TToken TToken::Fixed(std::string_view fixed)
 {
    TToken tok = {};
    for (auto i = 0u; i < kNumFixeds; ++i) {
-      if (fixed == kFixeds[i]) {
+      if (kFixeds[i] == fixed) {
          tok.fType = static_cast<ETokType>(kFirstFixed + i);
          break;
       }
@@ -1097,11 +1117,12 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
 
    if (node.fType.fFlags & TType::kTemplated) {
       out << '>';
-      // Put a space after the '>' only if we're about to close another template
+      // Put a space after the '>' only if we're about to close another template (i.e. if we're the last child of
+      // a templated node)
       if ((flags & kSpaceAfterClosingTemplate) && !node.fNextSibling && node.fParent &&
-          node.fParent->fNodeType == TNode::kType && node.fParent->fType.fIndirection == TType::EIndirection::kNone &&
-          !(node.fParent->fFlags & TNode::kScoped))
+          node.fParent->fNodeType == TNode::kType && (node.fParent->fType.fFlags & TType::kTemplated)) {
          out << ' ';
+      }
    }
 
    if (node.fType.fIndirection != TType::EIndirection::kNone) {
@@ -1159,9 +1180,9 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
          }
       }
 
-      if (!(flags & kStripCV) && node.fType.fFlags & TType::kConst)
+      if (!(flags & kStripPtrCV) && node.fType.fFlags & TType::kConst)
          out << "const";
-      if (!(flags & kStripCV) && node.fType.fFlags & TType::kVolatile)
+      if (!(flags & kStripPtrCV) && node.fType.fFlags & TType::kVolatile)
          out << "volatile";
    }
 }

@@ -255,14 +255,15 @@ struct TNode {
 
 enum EPrintFlags {
    kNone = 0x0,
-   kStripCV = 0x1,
-   kStripPointers = 0x2,
-   kStripRefs = 0x4,
-   kStripNamespace = 0x8,
+   kStripCV = 0x1,    // strip `const` and `volatile` from non-pointer types (const Foo *const -> Foo *const)
+   kStripPtrCV = 0x2, // strip `const` and `volatile` from pointers (const Foo *const -> const Foo*)
+   kStripPointers = 0x4,
+   kStripRefs = 0x8,
+   kStripNamespace = 0x10,
    // If true, consecutive closing templates will be spaced like "A<B<C> >" rather than "A<B<C>>"
-   kSpaceAfterClosingTemplate = 0x10,
+   kSpaceAfterClosingTemplate = 0x20,
    // If true, don't strip "class", "struct" or "enum" from the type
-   kKeepElabTypeSpecifier = 0x20,
+   kKeepElabTypeSpecifier = 0x40,
 
    kStripPointersAndRefs = kStripPointers | kStripRefs,
 };

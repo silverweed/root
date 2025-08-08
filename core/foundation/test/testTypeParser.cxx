@@ -390,6 +390,7 @@ TEST(TypeParser, ShortType)
          .Unwrap(),
       "std::pmr::polymorphic_allocator<std::sub_match<__gnu_cxx::__normal_iterator<"
       "char*,std::basic_string<char,std::char_traits<char>,std::pmr::polymorphic_allocator<char>>>>>");
+   EXPECT_EQ(ShortType("__atomic_base<TClass*const*>").Unwrap(), "__atomic_base<TClass*const*>");
 }
 
 TEST(TypeParser, ShortTypeExpr)
@@ -440,6 +441,9 @@ TEST(TypeParser, ShortTypeScoped)
 
    auto tree = ParseType("const Foo::Bar::baz*");
    EXPECT_EQ(StringifyNode(tree.fNodes[0]), "const Foo::Bar::baz*");
+
+   tree = ParseType("const std::regex_traits<char>::_RegexMask*");
+   EXPECT_EQ(StringifyNode(tree.fNodes[0]), "const std::regex_traits<char>::_RegexMask*");
 }
 
 TEST(TypeParser, PrintNodeFlags)
@@ -461,6 +465,12 @@ TEST(TypeParser, PrintNodeFlags)
 
    tree = ParseType("typename enable_if<(N>1&&N%2==0),void>::type");
    EXPECT_EQ(StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate), "typename enable_if<(N>1&&N%2==0),void>::type");
+
+   tree = ParseType(
+      "optional<pair<double,double>>::__not_constructing_bool_from_optional<const nullopt_t&,pair<double,double>>");
+   EXPECT_EQ(
+      StringifyNode(tree.fNodes[0], kSpaceAfterClosingTemplate),
+      "optional<pair<double,double> >::__not_constructing_bool_from_optional<const nullopt_t&,pair<double,double> >");
 }
 
 TEST(TypeParser, ShortTypeFnPtr)
