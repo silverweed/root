@@ -19,7 +19,6 @@ namespace ROOT::Internal::TypeParsing {
 static constexpr bool kAcceptExtendedSyntax = true;
 
 static constexpr std::size_t kNumFixeds = kLastFixed - kFirstFixed + 1;
-static const std::size_t kNumKeywords = kFirstNonKeyword - kFirstFixed;
 
 struct FixedStr {
    static constexpr std::size_t kMax = 32;
@@ -125,12 +124,17 @@ int TLexer::PeekFixed(std::size_t pos, std::size_t firstToCheck) const
    return idx;
 }
 
+static bool IsPartOfIdentifier(char ch)
+{
+   // NOTE: microbenchmarking showed that the branchless version is ~5 times faster than the branched one on
+   // my dev machine.
+   return (ch >= 'A' & ch <= 'Z') | (ch >= 'a' & ch <= 'z') | ch == '_' | (ch >= '0' & ch <= '9');
+}
+
 bool TLexer::IsWordTerminator(std::size_t pos) const
 {
    char ch = fSrc[pos];
-   // NOTE: a word is terminated by an operator, but not by a keyword
-   // (otherwise stuff like "vector" would be lexed as "vect" + "or")
-   return std::isspace(ch) || PeekFixed(pos) >= static_cast<int>(kNumKeywords);
+   return !IsPartOfIdentifier(ch);
 }
 
 TToken TLexer::PeekInternal(int flags)
