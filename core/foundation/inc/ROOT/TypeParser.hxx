@@ -12,6 +12,7 @@
 #include <iostream>
 #include <vector>
 #include <deque>
+#include <unordered_map>
 
 #include <ROOT/RError.hxx>
 
@@ -124,8 +125,9 @@ struct TLexer final {
    std::size_t fPrev[2] = {0};
    TToken fLatestToken = {};
 
-   // Returns the index inside kFixeds or -1 if not found
-   int PeekFixed(std::size_t pos, std::size_t firstToCheck = 0) const;
+   // Returns the trie pointing at the longest Fixed token that starts at `pos` in `fSrc`.
+   // If no match is found, Trie::fIdxInFixed will be < 0.
+   const struct Trie *PeekFixed(std::size_t pos) const;
    bool IsWordTerminator(std::size_t pos) const;
    bool IsStartOfNumber(std::size_t pos) const;
    TToken PeekInternal(int flags);

@@ -52,10 +52,64 @@ static FixedStr kFixeds[] = {
 #undef S
 static_assert(std::size(kFixeds) == kNumFixeds);
 
+static void AddChildTrie(Trie &parent, int idxInFixed, std::string_view word);
+
+// Acceleration structure used in PeekFixed. Faster than a naive linear search by almost a factor of 6.
+struct Trie {
+   struct Do_Init {};
+   static constexpr char kFirstUsedChar = ' ';
+   static constexpr char kLastUsedChar = '~';
+
+   std::unique_ptr<Trie> fChildren[kLastUsedChar - kFirstUsedChar + 1] = {0};
+   int fIdxInFixed = -1;
+   Trie *fParent = nullptr;
+
+   Trie() = default;
+
+   Trie(Do_Init)
+   {
+      for (auto i = 0u; i < kNumFixeds; ++i) {
+         auto fixed = kFixeds[i];
+         AddChildTrie(*this, i, std::string_view(fixed.fStr, fixed.fSize));
+      }
+   }
+};
+
+static std::size_t TrieCharToIndex(char ch)
+{
+   assert(ch >= Trie::kFirstUsedChar);
+   assert(ch <= Trie::kLastUsedChar);
+   return ch - Trie::kFirstUsedChar;
+}
+
+static void AddChildTrie(Trie &parent, int idxInFixed, std::string_view word)
+{
+   char ch = word[0];
+   auto idx = TrieCharToIndex(ch);
+   Trie *child;
+   if (!parent.fChildren[idx]) {
+      parent.fChildren[idx] = std::make_unique<Trie>();
+      parent.fChildren[idx]->fParent = &parent;
+      child = parent.fChildren[idx].get();
+   } else {
+      child = parent.fChildren[idx].get();
+   }
+   if (word.size() > 1)
+      AddChildTrie(*child, idxInFixed, word.substr(1));
+   else
+      child->fIdxInFixed = idxInFixed;
+}
+
+static const Trie &GetFixedTrie()
+{
+   static const Trie fixedTrie(Trie::Do_Init{});
+   return fixedTrie;
+}
+
 // NOTE: not using std::isspace because the compiler is not always able to inline it
 static bool IsSpace(char ch)
 {
-   return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f' || ch == '\v';
+   return ch == ' ' | ch == '\t' | ch == '\n' | ch == '\r' | ch == '\f' | ch == '\v';
 }
 
 /**
@@ -108,20 +162,20 @@ static bool IsPartOfNumber(char ch)
    return ch == '.' || ch == 'F' || ch == 'E' || ch == 'X' || ch == 'P' || ch == 'O' || ch == 'U' || ch == 'L';
 }
 
-int TLexer::PeekFixed(std::size_t pos, std::size_t firstToCheck) const
+const Trie *TLexer::PeekFixed(std::size_t pos) const
 {
-   int idx = -1;
-
-   // const std::size_t maxChars = fSrc.length() - pos;
-   const char *const curWord = fSrc.data() + pos;
-   for (std::size_t i = firstToCheck; i < std::size(kFixeds); ++i) {
-      std::size_t kwLen = kFixeds[i].fSize;
-      if (strncmp(kFixeds[i].fStr, curWord, kwLen) == 0) {
-         idx = i;
+   const Trie *curTrie = &GetFixedTrie();
+   while (pos < fSrc.size()) {
+      char ch = fSrc[pos];
+      auto idx = TrieCharToIndex(ch);
+      Trie *child = curTrie->fChildren[idx].get();
+      if (!child)
          break;
-      }
+      curTrie = child;
+      ++pos;
    }
-   return idx;
+
+   return curTrie;
 }
 
 static bool IsPartOfIdentifier(char ch)
@@ -228,8 +282,9 @@ TToken TLexer::PeekInternal(int flags)
       }
 
       // fixed
-      int fixedIdx = PeekFixed(cur - 1);
-      while (fixedIdx >= 0) {
+      auto fixedTrie = PeekFixed(cur - 1);
+      while (fixedTrie && fixedTrie->fIdxInFixed >= 0) {
+         auto fixedIdx = fixedTrie->fIdxInFixed;
          const ETokType tokType = static_cast<ETokType>(kFirstFixed + fixedIdx);
          const bool mustSkipShiftRight = ((flags & kPeekForceSplitGt) && tokType == kShiftRight);
          const auto keyword = kFixeds[fixedIdx];
@@ -246,7 +301,7 @@ TToken TLexer::PeekInternal(int flags)
             return tok;
          }
          // Try again: maybe that was a keyword with matching prefix but there is a valid one later.
-         fixedIdx = PeekFixed(cur - 1, fixedIdx + 1);
+         fixedTrie = fixedTrie->fParent;
       }
 
       // identifier

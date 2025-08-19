@@ -73,6 +73,9 @@ TEST(TypeParser, Lex)
    EXPECT_EQ(TLexer::Tokenize("T<(a.b->b + c.d)>"),
              VT({TToken::Ident("T"), kLt, kOpenRound, TToken::Ident("a"), kPeriod, TToken::Ident("b"), kArrow,
                  TToken::Ident("b"), kPlus, TToken::Ident("c"), kPeriod, TToken::Ident("d"), kCloseRound, kGt}));
+
+   EXPECT_EQ(TLexer::Tokenize("A<B<C>>"),
+             VT({TToken::Ident("A"), kLt, TToken::Ident("B"), kLt, TToken::Ident("C"), kShiftRight}));
 }
 
 TEST(TypeParser, LexTypeParam)
