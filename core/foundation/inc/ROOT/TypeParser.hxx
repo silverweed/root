@@ -256,7 +256,6 @@ struct TNode {
    void DropLastChild();
    TNode *LastChild() const;
    TNode *FirstNonScopedChild() const;
-   TType &AsType();
 };
 
 enum EPrintFlags {

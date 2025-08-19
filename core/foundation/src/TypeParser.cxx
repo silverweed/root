@@ -1447,10 +1447,4 @@ TNode *TNode::FirstNonScopedChild() const
    return c;
 }
 
-TType &TNode::AsType()
-{
-   assert(fNodeType == TNode::kType);
-   return fType;
-}
-
 } // namespace ROOT::Internal::TypeParsing
