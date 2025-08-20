@@ -3,6 +3,7 @@ import ROOT
 
 
 RFile = ROOT.Experimental.RFile
+RDirectory = ROOT.Experimental.RDirectory
 
 class RFileTests(unittest.TestCase):
     def test_open_for_reading(self):
@@ -17,14 +18,15 @@ class RFileTests(unittest.TestCase):
             tfile.WriteObject(hist, "hist")
 
         with RFile.OpenForReading(fileName) as rfile:
-            hist = rfile.Get("hist")
+            rdir = RDirectory(rfile)
+            hist = rdir.Get("hist")
             self.assertNotEqual(hist, None)
-            self.assertEqual(rfile.Get[ROOT.TH1D]("inexistent"), None)
-            self.assertEqual(rfile.Get[ROOT.TH1F]("hist"), None)
-            self.assertNotEqual(rfile.Get[ROOT.TH1]("hist"), None)
+            self.assertEqual(rdir.Get[ROOT.TH1D]("inexistent"), None)
+            self.assertEqual(rdir.Get[ROOT.TH1F]("hist"), None)
+            self.assertNotEqual(rdir.Get[ROOT.TH1]("hist"), None)
 
             foo = "foo"
-            self.assertRaises(rfile.Put("foo", foo))
+            self.assertRaises(rdir.Put("foo", foo))
         
 
 if __name__ == "__main__":

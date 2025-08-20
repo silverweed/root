@@ -21,6 +21,7 @@
 #include <string_view>
 #include <memory>
 #include <iostream>
+#include <algorithm>
 
 namespace ROOT {
 namespace Experimental {
@@ -261,8 +262,8 @@ private:
    void Print(std::ostream &out = std::cout) const;
 };
 
-class RDirectory {
-   RFile &fFile;
+class RDirectory final {
+   RFile *fFile = nullptr;
    std::string fRootDir;
 
    std::string FullPath(std::string_view basePath) const {
@@ -270,7 +271,7 @@ class RDirectory {
    }
    
 public:
-   explicit RDirectory(RFile &file, std::string_view rootDir = "") : fFile(file)
+   explicit RDirectory(RFile &file, std::string_view rootDir = "") : fFile(&file)
    {
       // Strip trailing '/'
       int stripLen = (!rootDir.empty() && rootDir[rootDir.length() - 1] == '/') ? 1 : 0;
@@ -278,11 +279,11 @@ public:
    }
 
    const std::string &GetRootPath() const { return fRootDir; }
-   RFile &GetFile() { return fFile; }
+   RFile &GetFile() { return *fFile; }
 
    RDirectory MakeSubdir(std::string_view subPath) const
    {
-      RDirectory dir(fFile, FullPath(subPath));
+      RDirectory dir(*fFile, FullPath(subPath));
       return dir;
    }
 
@@ -290,30 +291,30 @@ public:
    template <typename T>
    std::unique_ptr<T> Get(std::string_view path) const
    {
-      return fFile.Get<T>(FullPath(path));
+      return fFile->Get<T>(FullPath(path));
    }
 
    /// \see RFile::Put
    template <typename T>
    void Put(std::string_view path, const T &obj)
    {
-      fFile.Put<T>(FullPath(path), obj);
+      fFile->Put<T>(FullPath(path), obj);
    }
 
    /// \see RFile::Overwrite
    template <typename T>
    void Overwrite(std::string_view path, const T &obj, bool backupPrevious = true)
    {
-      fFile.Overwrite(FullPath(path), obj, backupPrevious);
+      fFile->Overwrite(FullPath(path), obj, backupPrevious);
    }
 
    /// \see RFile::GetKeys
-   RFileKeyIterable GetKeys(std::string_view rootDir = "") const { return fFile.GetKeys(FullPath(rootDir)); }
+   RFileKeyIterable GetKeys(std::string_view rootDir = "") const { return fFile->GetKeys(FullPath(rootDir)); }
 
    /// \see RFile::GetKeysNonRecursive
    RFileKeyIterable GetKeysNonRecursive(std::string_view rootDir = "") const
    {
-      return fFile.GetKeysNonRecursive(FullPath(rootDir));
+      return fFile->GetKeysNonRecursive(FullPath(rootDir));
    }
 };
 
