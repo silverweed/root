@@ -128,10 +128,10 @@ TEST(TClassEdit, SplitFunc)
    EXPECT_EQ("...", fsi.fFunctionTemplateArguments[5]);
    EXPECT_TRUE(fsi.fFunctionParameters.empty());
 
-
    TClassEdit::SplitFunction("bar< foo(x::y), long long>                 "
                              "cde::fgh<ijk<x(y)>::bar>::foo<bar(a<b(c)>)>"
-                             "(a::b<c::d<e::f(g::h)>*>::i j = k(l,m<n,p::o<q(r)>>))", fsi);
+                             "(a::b<c::d<e::f(g::h)>*>::i j = k(l,m<n,p::o<q(r)>>))",
+                             fsi);
    EXPECT_EQ("bar< foo(x::y), long long>", fsi.fReturnType);
    EXPECT_EQ("cde::fgh<ijk<x(y)>::bar>", fsi.fScopeName);
    EXPECT_EQ("foo", fsi.fFunctionName);
@@ -140,13 +140,15 @@ TEST(TClassEdit, SplitFunc)
    EXPECT_EQ(1u, fsi.fFunctionParameters.size());
    EXPECT_EQ("a::b<c::d<e::f(g::h)>*>::i j = k(l,m<n,p::o<q(r)>>)", fsi.fFunctionParameters[0]);
 
-   TClassEdit::SplitFunction("someNamespace::someClass< std::function<void (sometype&)> >::FunctionName(std::function<void (someothertype&)>)", fsi);
+   TClassEdit::SplitFunction(
+      "someNamespace::someClass< std::function<void (sometype&)> >::FunctionName(std::function<void (someothertype&)>)",
+      fsi);
    EXPECT_EQ("", fsi.fReturnType);
    EXPECT_EQ("someNamespace::someClass< std::function<void (sometype&)> >", fsi.fScopeName);
    EXPECT_EQ("FunctionName", fsi.fFunctionName);
    EXPECT_TRUE(fsi.fFunctionTemplateArguments.empty());
    EXPECT_EQ(1u, fsi.fFunctionParameters.size());
-   EXPECT_EQ("std::function<void (someothertype&)>", fsi.fFunctionParameters[0]);   
+   EXPECT_EQ("std::function<void (someothertype&)>", fsi.fFunctionParameters[0]);
 }
 
 TEST(TClassEdit, SplitFuncErrors)
@@ -273,7 +275,7 @@ TEST(TClassEdit, ResolveTypedef)
    EXPECT_STREQ("const int", TClassEdit::ResolveTypedef("mytype_t").c_str());
    EXPECT_STREQ("const int", TClassEdit::ResolveTypedef("cmytype_t").c_str());
    // #18833
-   const char* type_18833 = "pair<TAttMarker*,TGraph*(  *  )(const std::string&,const std::string&,TH1F*) >";
+   const char *type_18833 = "pair<TAttMarker*,TGraph*(  *  )(const std::string&,const std::string&,TH1F*) >";
    EXPECT_STREQ(type_18833, TClassEdit::ResolveTypedef(type_18833).c_str());
 }
 
@@ -294,11 +296,10 @@ TEST(TClassEdit, DefAlloc)
    EXPECT_TRUE(TClassEdit::IsDefAlloc("std::allocator<std::pair<K,V>  const  >", "K", "V"));
 }
 
-
 TEST(TClassEdit, GetNormalizedName)
 {
    std::string n;
-   
+
    // https://github.com/root-project/root/issues/6607
    TClassEdit::GetNormalizedName(n, "std::vector<float, class std::allocator<float>>");
    EXPECT_STREQ("vector<float>", n.c_str());
@@ -310,7 +311,6 @@ TEST(TClassEdit, GetNormalizedName)
 
    n.clear();
    EXPECT_THROW(TClassEdit::GetNormalizedName(n, "_Atomic(map<string, TObjArray* >*"), std::runtime_error);
-
 }
 
 // https://github.com/root-project/root/issues/18654
@@ -350,7 +350,7 @@ TEST(TClassEdit, SplitType)
 
    gInterpreter->ProcessLine(".L file_16199.C+");
    auto c = TClass::GetClass("o2::dataformats::AbstractRef<25,5,2>");
-   auto si = (TStreamerInfo*) c->GetStreamerInfo();
+   auto si = (TStreamerInfo *)c->GetStreamerInfo();
    si->ls("noaddr");
 }
 
@@ -367,4 +367,19 @@ TEST(TClassEdit, ShortType)
 
    shortType = TClassEdit::ShortType("std::function<bool(std::vector<int>, float)>", 0);
    EXPECT_EQ(shortType, "std::function<bool(std::vector<int>,float)>");
+
+   shortType = TClassEdit::ShortType("std::map<double,std::vector<unsigned int,std::allocator<unsigned int> "
+                                     ">,std::less<double>,std::allocator<std::pair<const double,std::vector<unsigned "
+                                     "int,std::allocator<unsigned int> > > > >",
+                                     TClassEdit::kDropDefaultAlloc | TClassEdit::kDropStlDefault |
+                                        TClassEdit::kDropStd | TClassEdit::kKeepOuterConst);
+   EXPECT_EQ(shortType, "map<double,vector<unsigned int> >");
+
+   shortType =
+      TClassEdit::ShortType("std::vector<ROOT::Internal::TSchemaHelper,std::allocator<ROOT::Internal::TSchemaHelper>>",
+                            TClassEdit::kDropStlDefault|TClassEdit::kDropStd);
+   EXPECT_EQ(shortType, "vector<ROOT::Internal::TSchemaHelper>");
+
+   shortType = TClassEdit::ShortType("map<double,vector<unsigned int>,less<double> >", TClassEdit::kDropStlDefault);
+   EXPECT_EQ(shortType, "map<double,vector<unsigned int> >");
 }

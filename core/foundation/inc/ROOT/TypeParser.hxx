@@ -340,6 +340,22 @@ std::string StringifyNode(const TNode &node, int flags = kNone);
 
 ROOT::RResult<std::string> ShortType(std::string_view typeDesc);
 
+inline bool ForEachNode(TNode *root, std::function<bool(TNode *)> &&fn)
+{
+   std::vector<TNode *> toVisit;
+   toVisit.push_back(root);
+   do {
+      TNode *cur = toVisit.back();
+      toVisit.pop_back();
+      for (TNode *child = cur->fFirstChild; child; child = child->fNextSibling)
+         toVisit.push_back(child);
+
+      if (!fn(cur))
+         return false;
+   } while (!toVisit.empty());
+   return true;
+}
+
 } // namespace ROOT::Internal::TypeParsing
 
 #endif

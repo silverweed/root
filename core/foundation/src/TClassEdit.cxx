@@ -1382,6 +1382,127 @@ static std::string StringifyMode(int mode)
    return ROOT::Join("|", flags);
 }
 
+enum class EAllocKind {
+   kNoAlloc,
+   kAllocNonAssoc,
+   kAllocAssoc,
+};
+
+static bool TreeMatches(ROOT::Internal::TypeParsing::TNode *a, ROOT::Internal::TypeParsing::TNode *b)
+{
+   using namespace ROOT::Internal::TypeParsing;
+
+   if (a->fNodeType != b->fNodeType)
+      return false;
+   if (a->fNumChildren != b->fNumChildren)
+      return false;
+
+   if (a->fNodeType == TNode::kType) {
+      if (a->fType.fName != b->fType.fName)
+         return false;
+      if (a->fType.fNamespace != b->fType.fNamespace)
+         return false;
+   } else {
+      bool exprMatch = StringifyNode(*a) == StringifyNode(*b);
+      return exprMatch;
+   }
+
+   for (TNode *ca = a->fFirstChild, *cb = b->fFirstChild; ca && cb; ca = ca->fNextSibling, cb = cb->fNextSibling) {
+      if (!TreeMatches(ca, cb))
+         return false;
+   }
+
+   return true;
+}
+
+static bool IsDefAlloc(const ROOT::Internal::TypeParsing::TNode &parent,
+                       const ROOT::Internal::TypeParsing::TNode &alloc, EAllocKind allocKind)
+{
+   using namespace ROOT::Internal::TypeParsing;
+
+   // clang-format off
+   if (R__unlikely(!(
+         // Preconditions for being an allocator:
+         allocKind != EAllocKind::kNoAlloc &&
+         alloc.fParent == &parent &&
+         parent.fNodeType == TNode::kType &&
+         alloc.fNodeType == TNode::kType &&
+         alloc.fNumChildren == 1 &&
+         alloc.fFirstChild->fNodeType == TNode::kType
+   )))
+   {
+      return false;
+   }
+   // clang-format on
+
+   auto isStd = [](std::string_view ns) { return ns.empty() || ROOT::StartsWith(ns, "std::"); };
+
+   if (alloc.fType.fName != "allocator" || !isStd(alloc.fType.fNamespace))
+      return false;
+
+   const auto &allocChild = alloc.fFirstChild->fType;
+   if (allocKind == EAllocKind::kAllocAssoc) {
+      if (alloc.fFirstChild->fNumChildren != 2 || allocChild.fName != "pair" || !isStd(allocChild.fNamespace))
+         return false;
+
+      TNode *keyNode = parent.FirstNonScopedChild();
+      TNode *valNode = keyNode->fNextSibling;
+      TNode *allocKeyNode = alloc.fFirstChild->fFirstChild;
+      TNode *allocValNode = allocKeyNode->fNextSibling;
+
+      bool matches = TreeMatches(keyNode, allocKeyNode);
+      matches = matches && TreeMatches(valNode, allocValNode);
+      return matches;
+   } else {
+      assert(allocKind == EAllocKind::kAllocNonAssoc);
+      bool matches = TreeMatches(alloc.fFirstChild, parent.fFirstChild);
+      return matches;
+   }
+}
+
+static bool IsDefElem(const ROOT::Internal::TypeParsing::TNode &parent, const ROOT::Internal::TypeParsing::TNode &elem,
+                      std::string_view expected)
+{
+   using namespace ROOT::Internal::TypeParsing;
+
+   // clang-format off
+   if (R__unlikely(!(
+         // Preconditions:
+         elem.fParent == &parent &&
+         parent.fNodeType == TNode::kType &&
+         elem.fNodeType == TNode::kType &&
+         elem.fNumChildren == 1 &&
+         elem.fFirstChild->fNodeType == TNode::kType
+   )))
+   {
+      return false;
+   }
+   // clang-format on
+
+   auto isStd = [](std::string_view ns) { return ns.empty() || ROOT::StartsWith(ns, "std::"); };
+
+   if (elem.fType.fName != expected || !isStd(elem.fType.fNamespace))
+      return false;
+
+   bool matches = TreeMatches(elem.fFirstChild, parent.fFirstChild);
+   return matches;
+}
+
+static bool IsDefComp(const ROOT::Internal::TypeParsing::TNode &parent, const ROOT::Internal::TypeParsing::TNode &elem)
+{
+   return IsDefElem(parent, elem, "less");
+}
+
+static bool IsDefPred(const ROOT::Internal::TypeParsing::TNode &parent, const ROOT::Internal::TypeParsing::TNode &elem)
+{
+   return IsDefElem(parent, elem, "equal_to");
+}
+
+static bool IsDefHash(const ROOT::Internal::TypeParsing::TNode &parent, const ROOT::Internal::TypeParsing::TNode &elem)
+{
+   return IsDefElem(parent, elem, "hash");
+}
+
 static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, int mode)
 {
    using namespace ROOT::Internal::TypeParsing;
@@ -1398,20 +1519,17 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, 
       kArgComparator,
       kArgHashAndKeyEqual,
    } stlArgKind = kArgNone;
-   enum {
-      kNoAlloc,
-      kAllocNonAssoc,
-      kAllocAssoc,
-   } stlAlloc = kNoAlloc;
+
+   EAllocKind stlAlloc = EAllocKind::kNoAlloc;
 
    if (name == "vector" || name == "deque" || name == "set" || name == "unordered_set" || name == "list" ||
        name == "forward_list" || name == "multiset" || name == "unordered_multiset") {
-      stlAlloc = kAllocNonAssoc;
+      stlAlloc = EAllocKind::kAllocNonAssoc;
    } else if (name == "map" || name == "unordered_map" || name == "multimap" || name == "unordered_multimap") {
-      stlAlloc = kAllocAssoc;
+      stlAlloc = EAllocKind::kAllocAssoc;
    }
 
-   if (stlAlloc != kNoAlloc) {
+   if (stlAlloc != EAllocKind::kNoAlloc) {
       if (name == "set" || name == "map" || name == "multiset" || name == "multimap") {
          stlArgKind = kArgComparator;
       } else if (name == "unordered_set" || name == "unordered_map" || name == "unordered_multiset" ||
@@ -1446,14 +1564,14 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, 
       }
    }
 
-   if ((mode & TClassEdit::kDropDefaultAlloc) && (stlAlloc != kNoAlloc)) {
+   if ((mode & TClassEdit::kDropDefaultAlloc) && (stlAlloc != EAllocKind::kNoAlloc)) {
       // For all supported classes, the allocator is always the last child.
       TNode *lastChild = node.LastChild();
 
       // number of children required to have an allocator
       auto allocIdx = 2;
       // associative collections have at least 2 non-alloc children (key + value)
-      allocIdx += (stlAlloc == kAllocAssoc);
+      allocIdx += (stlAlloc == EAllocKind::kAllocAssoc);
       // we might have a comparator in between...
       allocIdx += (stlArgKind == kArgComparator);
       // ...or an Hash and a KeyEqual
@@ -1463,15 +1581,7 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, 
 
       bool shouldDrop = node.fNumChildren == allocIdx;
       if (!(mode & TClassEdit::kDropAlloc)) {
-         auto allocName = StringifyNode(*lastChild, kStripCV);
-         if (stlAlloc == kAllocNonAssoc) {
-            auto containedTypeName = StringifyNode(*node.fFirstChild, kStripCV);
-            shouldDrop = TClassEdit::IsDefAlloc(allocName.c_str(), containedTypeName.c_str());
-         } else if (node.fNumChildren > 2) {
-            auto keyName = StringifyNode(*node.fFirstChild, kStripCV);
-            auto valName = StringifyNode(*node.fFirstChild->fNextSibling, kStripCV);
-            shouldDrop = TClassEdit::IsDefAlloc(allocName.c_str(), keyName.c_str(), valName.c_str());
-         }
+         shouldDrop = shouldDrop && IsDefAlloc(node, *lastChild, stlAlloc);
       }
       if (shouldDrop)
          node.DropLastChild();
@@ -1512,34 +1622,17 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, 
    }
 
    if ((mode & TClassEdit::kDropStlDefault) && (stlArgKind != kArgNone)) {
-      assert(stlAlloc != kNoAlloc);
+      assert(stlAlloc != EAllocKind::kNoAlloc);
 
-      if ((stlArgKind == kArgComparator) && node.fNumChildren == 2) {
-         auto compName = StringifyNode(*node.LastChild(), kStripCV);
-         // The elem name is either the first child (non-associative containers) or the second child (associative)
-         auto elemName = StringifyNode(
-            (stlArgKind == kAllocNonAssoc) ? *node.fFirstChild : *node.fFirstChild->fNextSibling, kStripCV);
-         bool shouldDrop = TClassEdit::IsDefComp(compName.c_str(), elemName.c_str());
+      if ((stlArgKind == kArgComparator) && node.fNumChildren >= 2) {
+         bool shouldDrop = IsDefComp(node, *node.LastChild());
          if (shouldDrop)
             node.DropLastChild();
       } else if (stlArgKind == kArgHashAndKeyEqual) {
-         // handle key equal first if needed
-         if (node.fNumChildren == 3) {
-            auto keyEqualName = StringifyNode(*node.LastChild(), kStripCV);
-            auto elemName = StringifyNode(
-               (stlArgKind == kAllocNonAssoc) ? *node.fFirstChild : *node.fFirstChild->fNextSibling, kStripCV);
-            bool shouldDrop = TClassEdit::IsDefPred(keyEqualName.c_str(), elemName.c_str());
-            if (shouldDrop)
-               node.DropLastChild();
-         }
-         if (node.fNumChildren == 2) {
-            auto hashName = StringifyNode(*node.LastChild(), kStripCV);
-            auto elemName = StringifyNode(
-               (stlArgKind == kAllocNonAssoc) ? *node.fFirstChild : *node.fFirstChild->fNextSibling, kStripCV);
-            bool shouldDrop = TClassEdit::IsDefHash(hashName.c_str(), elemName.c_str());
-            if (shouldDrop)
-               node.DropLastChild();
-         }
+         const auto checkFn = (node.fNumChildren == 3) ? IsDefPred : IsDefHash;
+         bool shouldDrop = checkFn(node, *node.LastChild());
+         if (shouldDrop)
+            node.DropLastChild();
       }
    }
 
@@ -1587,7 +1680,10 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
       ~Timer() { Stop(); }
    };
 #else
-   struct Timer { Timer(const char *) {} void Stop() {}};
+   struct Timer {
+      Timer(const char *) {}
+      void Stop() {}
+   };
 #endif
 
    std::string answer;
@@ -1648,20 +1744,10 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
       }
    }
 
-   const auto forEachNode = [](TNode *root, std::function<void(TNode *)> &&fn) {
-      std::vector<TNode *> toVisit;
-      toVisit.push_back(root);
-      do {
-         TNode *cur = toVisit.back();
-         toVisit.pop_back();
-         for (TNode *child = cur->fFirstChild; child; child = child->fNextSibling)
-            toVisit.push_back(child);
-
-         fn(cur);
-      } while (!toVisit.empty());
-   };
-
-   forEachNode(type, [mode](TNode *cur) { ShortTypeHandleSingleNode(*cur, mode); });
+   ForEachNode(type, [mode](TNode *cur) {
+      ShortTypeHandleSingleNode(*cur, mode);
+      return true;
+   });
 
    std::stringstream newAns;
    int flags = EPrintFlags::kSpaceAfterClosingTemplate;
@@ -1689,7 +1775,7 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
 
 #if DEBUG_ENABLE_OLD && DEBUG_ENABLE_NEW && DEBUG_DUMP_DIFFERENCES
    if (strcmp("::_Storage<_Up,>", typeDesc) == 0) {
-   // if (newAns.str() != oldAnswer) {
+      // if (newAns.str() != oldAnswer) {
       Error("TClassEdit_Diff", "answer != oldAnswer!\n  mode: %s\n  orig: %s\n  new: `%s`\n  old: `%s`",
             StringifyMode(mode).c_str(), typeDesc, newAns.str().c_str(), oldAnswer.c_str());
       R__ASSERT(false);
