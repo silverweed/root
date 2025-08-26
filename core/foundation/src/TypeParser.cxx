@@ -451,11 +451,51 @@ std::string TToken::ToString() const
    return ss.str();
 }
 
+TNodeArena *MakeArena()
+{
+   TNodeArena *arena = new TNodeArena();
+   arena->fLast = arena;
+   return arena;
+}
+
+TNode *TNodeArena::Push()
+{
+   auto arena = fLast;
+   if (fNElems == TNodeArena::kCapacityElems) {
+      assert(false);
+      auto newArena = MakeArena();
+      newArena->fPrev = arena;
+      arena = fLast = newArena;
+   }
+
+   TNode *node = &arena->fElems[arena->fNElems];
+   ++arena->fNElems;
+   return node;
+}
+
+TNodeTree::TNodeTree()
+{
+   fArena = MakeArena();
+}
+
+TNodeTree::~TNodeTree()
+{
+   if (fArena) {
+      for (TNodeArena *node = fArena->fLast, *prev = nullptr; node; node = prev) {
+         prev = node->fPrev;
+         delete node;
+      }
+   }
+}
+
 TNode *TNodeTree::PushNode(TNode::ENodeType type)
 {
-   auto &newNode = fNodes.emplace_back();
-   newNode.fNodeType = type;
-   return &newNode;
+   TNode *newNode = fArena->Push();
+   ++fNumNodes;
+   newNode->fNodeType = type;
+   if (R__unlikely(!fRoot))
+      fRoot = newNode;
+   return newNode;
 }
 
 void TNodeTree::AddChild(TNode *parent, TNode *newChild)
@@ -476,20 +516,21 @@ void TNodeTree::AddChild(TNode *parent, TNode *newChild)
 
 void TNodeTree::WrapNode(TNode *const node)
 {
-   TNode wrapped = *node; // copy the node to wrap
+   TNode *wrapped = fArena->Push();
+   ++fNumNodes;
+   *wrapped = *node; // copy the node to wrap
    node->fType = {};
    node->fExpr = {};
    node->fFlags = 0;
-   auto &newNode = fNodes.emplace_back(wrapped);
 
    // Adjust links
    for (TNode *child = node->fFirstChild; child; child = child->fNextSibling)
-      child->fParent = &newNode;
-   newNode.fNumChildren = node->fNumChildren;
-   newNode.fParent = node;
-   newNode.fNextSibling = nullptr;
-   newNode.fFirstChild = node->fFirstChild;
-   node->fFirstChild = &newNode;
+      child->fParent = wrapped;
+   wrapped->fNumChildren = node->fNumChildren;
+   wrapped->fParent = node;
+   wrapped->fNextSibling = nullptr;
+   wrapped->fFirstChild = node->fFirstChild;
+   node->fFirstChild = wrapped;
    node->fNumChildren = 1;
 }
 
@@ -823,8 +864,8 @@ static bool ParseTemplate(TLexer &lex, TNodeTree &tree, TNode &parentType)
             childType = TNode::kExpr;
          }
          // special case: check if this is an array expression.
-         // We consider it an expression rather than an array type depending on whether the bracket closes immediately
-         // (type) or not (expr). So in `T<v[1]>` v[1] is an expression but in `T<v[]>` v[] is a type.
+         // We consider it an expression rather than an array type depending on whether the bracket closes
+         // immediately (type) or not (expr). So in `T<v[1]>` v[1] is an expression but in `T<v[]>` v[] is a type.
          if (tok.fType == kIdent) {
             lex.Consume();
             tok = lex.Peek();
@@ -1067,9 +1108,9 @@ static bool ParseScopedType(TLexer &lex, TNodeTree &tree, TNode *type)
    while (tok.fType == kColonColon) {
       lex.Consume();
 
-      // If we have an inner type, the outer type gets "frozen" and all further modifications apply to the inner type.
-      // To do this we wrap the outer type into the inner type and go on.
-      // Note that in our node tree the outer type is the *child* of the inner type rather than the other way around.
+      // If we have an inner type, the outer type gets "frozen" and all further modifications apply to the inner
+      // type. To do this we wrap the outer type into the inner type and go on. Note that in our node tree the outer
+      // type is the *child* of the inner type rather than the other way around.
       const auto specifiers = type->fType.fFlags & (TType::kCvMask | TType::kModifiersMask);
       tree.WrapNode(type);
       type->fFlags |= TNode::kScoped;
@@ -1339,10 +1380,10 @@ std::string StringifyNode(const TNode &node, int flags)
 
 void TNodeTree::Print(std::ostream &out, int flags) const
 {
-   if (fNodes.empty())
+   if (!fRoot)
       return;
 
-   PrintNode(out, fNodes[0], flags);
+   PrintNode(out, *fRoot, flags);
 }
 
 static void PrintNodeDebug(std::ostream &out, const TNode &node, int indent)
@@ -1371,10 +1412,10 @@ static void PrintNodeDebug(std::ostream &out, const TNode &node, int indent)
 
 void TNodeTree::PrintTreeDebug(std::ostream &out) const
 {
-   if (fNodes.empty())
+   if (!fRoot)
       return;
 
-   PrintNodeDebug(out, fNodes[0], 0);
+   PrintNodeDebug(out, *fRoot, 0);
 }
 
 ROOT::RResult<std::string> ShortType(std::string_view typeDesc)

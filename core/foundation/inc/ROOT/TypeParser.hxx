@@ -13,6 +13,8 @@
 #include <vector>
 #include <deque>
 #include <unordered_map>
+#include <functional>
+#include <cassert>
 
 #include <ROOT/RError.hxx>
 
@@ -273,6 +275,20 @@ enum EPrintFlags {
    kStripPointersAndRefs = kStripPointers | kStripRefs,
 };
 
+// Grow-only non-relocating arena
+struct TNodeArena {
+   static constexpr std::size_t kCapacityElems = 256;
+
+   TNodeArena *fLast = nullptr;
+   TNodeArena *fPrev = nullptr;
+
+   TNode fElems[kCapacityElems] = {};
+   std::size_t fNElems = 0;
+
+   TNode *Push();
+};
+static constexpr std::size_t kArenaHeaderSize = sizeof(TNodeArena);
+
 /// A tree constructed from parsing a type.
 /// Nodes are either types or expressions.
 /// Types have children in case of templates (e.g A<B, C> has root A with children B and C) and expressions have
@@ -281,10 +297,26 @@ enum EPrintFlags {
 /// to its first children and its next sibling.
 /// VERY IMPORTANT NOTE: this structure can only be safely accessed as long as the parsed string is alive.
 struct TNodeTree {
-   // deque to keep pointers valid.
-   // The root is always fNodes[0].
-   std::deque<TNode> fNodes;
+   TNodeArena *fArena = nullptr;
+   TNode *fRoot = nullptr;
+   std::size_t fNumNodes = 0;
    std::vector<std::string> fErrors;
+
+   TNodeTree();
+   TNodeTree(const TNodeTree &) = delete;
+   TNodeTree &operator=(const TNodeTree &) = delete;
+   TNodeTree(TNodeTree &&other) { *this = std::move(other); }
+   TNodeTree &operator=(TNodeTree &&other)
+   {
+      if (this != &other) {
+         std::swap(fArena, other.fArena);
+         std::swap(fRoot, other.fRoot);
+         std::swap(fNumNodes, other.fNumNodes);
+         std::swap(fErrors, other.fErrors);
+      }
+      return *this;
+   }
+   ~TNodeTree();
 
    TNode *PushNode(TNode::ENodeType type);
    void AddChild(TNode *parent, TNode *child);
