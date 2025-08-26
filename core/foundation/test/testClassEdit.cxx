@@ -377,9 +377,14 @@ TEST(TClassEdit, ShortType)
 
    shortType =
       TClassEdit::ShortType("std::vector<ROOT::Internal::TSchemaHelper,std::allocator<ROOT::Internal::TSchemaHelper>>",
-                            TClassEdit::kDropStlDefault|TClassEdit::kDropStd);
+                            TClassEdit::kDropStlDefault | TClassEdit::kDropStd);
    EXPECT_EQ(shortType, "vector<ROOT::Internal::TSchemaHelper>");
 
    shortType = TClassEdit::ShortType("map<double,vector<unsigned int>,less<double> >", TClassEdit::kDropStlDefault);
    EXPECT_EQ(shortType, "map<double,vector<unsigned int> >");
+
+   shortType = TClassEdit::ShortType(
+      "std::unordered_set<void*,std::hash<void*>,std::equal_to<void*>,std::allocator<void*> >",
+      TClassEdit::kDropDefaultAlloc | TClassEdit::kDropStlDefault | TClassEdit::kDropStd | TClassEdit::kKeepOuterConst);
+   EXPECT_EQ(shortType, "unordered_set<void*>");
 }

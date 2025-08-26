@@ -1503,14 +1503,77 @@ static bool IsDefHash(const ROOT::Internal::TypeParsing::TNode &parent, const RO
    return IsDefElem(parent, elem, "hash");
 }
 
-static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, int mode)
+static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tree,
+                                      ROOT::Internal::TypeParsing::TNode *&node, int mode)
 {
    using namespace ROOT::Internal::TypeParsing;
 
-   if (node.fNodeType != TNode::kType)
+   if (node->fNodeType != TNode::kType || node->fType.fIndirection != TType::EIndirection::kNone)
       return;
 
-   auto &type = node.fType;
+   // Before doing any extra work, resolve typedefs if needed.
+#if 1
+   if (mode & TClassEdit::kResolveTypedef) {
+      auto type = StringifyNode(*node, kStripCV);
+      std::string typeresult;
+
+      // TEMP
+      if (strstr(type.c_str(), "RDavixFileDes"))
+         Info("TClassEdit", "Resolving type %s", type.c_str());
+
+      if (gInterpreterHelper->ExistingTypeCheck(type.c_str(), typeresult) ||
+          gInterpreterHelper->GetPartiallyDesugaredNameWithScopeHandling(type, typeresult, false)) {
+         // it is a known type
+         if (!typeresult.empty()) {
+            // and it is a typedef, we need to replace it in the output.
+            // TEMP
+            if (strstr(type.c_str(), "RDavixFileDes"))
+               Info("TClassEdit", "Success. typeresult = %s", typeresult.c_str());
+
+            auto resolvedTypeTree = ParseType(typeresult);
+            if (!resolvedTypeTree.fErrors.empty()) {
+               Error("TClassEdit", "Failed to parse resolved type of %s `%s`:", type.c_str(), typeresult.c_str());
+               for (const auto &err : resolvedTypeTree.fErrors)
+                  Error("TClassEdit", "%s", err.c_str());
+               return;
+            }
+
+            // Graft the resolved type tree into the original node
+            if (node == &tree.fNodes[0]) {
+               // if this was the top-level node, replace the whole tree.
+               Info("TClassEdit", "Replacing node %s with %s. node before: %p", StringifyNode(*node).c_str(), StringifyNode(resolvedTypeTree.fNodes[0]).c_str(), node);
+               tree = resolvedTypeTree;
+               node = &tree.fNodes[0];
+               Info("TClassEdit", "node after: %p", node);
+            } else {
+               R__ASSERT(false); // TEMP
+               auto nodeIdx = tree.fNodes.size();
+               tree.fNodes.insert(tree.fNodes.end(), resolvedTypeTree.fNodes.begin(), resolvedTypeTree.fNodes.end());
+               auto newNode = &tree.fNodes[nodeIdx];
+               // Adjust parent/child links for the newnode, its parent and its previous sibling
+               newNode->fParent = node->fParent;
+               for (TNode **child = &node->fParent->fFirstChild; *child; child = &(*child)->fNextSibling) {
+                  if (*child == node) {
+                     newNode->fNextSibling = (*child)->fNextSibling;
+                     *child = newNode;
+                     break;
+                  }
+               }
+               node = newNode;
+            }
+         }
+      } else {
+         if (strstr(type.c_str(), "RDavixFileDes"))
+            Error("TClassEdit", "Failed to resolve");
+      }
+
+      // Check this again, in case the typedef resolution changed the node type.
+      if (node->fNodeType != TNode::kType || node->fType.fIndirection != TType::EIndirection::kNone)
+         return;
+   }
+#endif
+
+   auto &type = node->fType;
    const auto &name = type.fName;
 
    // Gather info about the node
@@ -1539,6 +1602,9 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, 
    }
 
    // Setup implied mode flags
+   if (mode & TClassEdit::kDropHash)
+      mode |= TClassEdit::kDropComparator;
+
    if (mode & TClassEdit::kDropComparator)
       mode |= TClassEdit::kDropAlloc;
 
@@ -1556,17 +1622,17 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, 
       // Normalize std::string
       static const std::regex basicStringRegex{
          "(std::)?basic_string<char,(std::)?char_traits<char>(,(std::)?(pmr::polymorphic_)?allocator<char>)?\\s*>"};
-      const auto &fullName = StringifyNode(node, EPrintFlags::kStripCV);
+      const auto &fullName = StringifyNode(*node, EPrintFlags::kStripCV);
       if (std::regex_match(fullName, basicStringRegex)) {
          type.fName = "string";
          type.fFlags &= ~TType::kTemplated;
-         node.fFirstChild = nullptr;
+         node->fFirstChild = nullptr;
       }
    }
 
    if ((mode & TClassEdit::kDropDefaultAlloc) && (stlAlloc != EAllocKind::kNoAlloc)) {
       // For all supported classes, the allocator is always the last child.
-      TNode *lastChild = node.LastChild();
+      TNode *lastChild = node->LastChild();
 
       // number of children required to have an allocator
       auto allocIdx = 2;
@@ -1577,14 +1643,14 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, 
       // ...or an Hash and a KeyEqual
       allocIdx += 2 * (stlArgKind == kArgHashAndKeyEqual);
 
-      assert(node.fNumChildren <= allocIdx);
+      assert(node->fNumChildren <= allocIdx);
 
-      bool shouldDrop = node.fNumChildren == allocIdx;
+      bool shouldDrop = node->fNumChildren == allocIdx;
       if (!(mode & TClassEdit::kDropAlloc)) {
-         shouldDrop = shouldDrop && IsDefAlloc(node, *lastChild, stlAlloc);
+         shouldDrop = shouldDrop && IsDefAlloc(*node, *lastChild, stlAlloc);
       }
       if (shouldDrop)
-         node.DropLastChild();
+         node->DropLastChild();
    }
 
    // When it comes to "DropStlDefault", we have 3 categories of STL classes:
@@ -1614,26 +1680,32 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNode &node, 
 
    if ((mode & TClassEdit::kDropComparator) && (stlArgKind == kArgComparator)) {
       // Since DropComparator implies DropAlloc, we know the comparator, if there, is the last child.
-      if (node.fNumChildren == 2)
-         node.DropLastChild();
+      if (node->fNumChildren == 2)
+         node->DropLastChild();
    }
 
    if ((mode & TClassEdit::kDropHash) && (stlArgKind == kArgHashAndKeyEqual)) {
+      if (node->fNumChildren == 2)
+         node->DropLastChild();
    }
 
    if ((mode & TClassEdit::kDropStlDefault) && (stlArgKind != kArgNone)) {
       assert(stlAlloc != EAllocKind::kNoAlloc);
 
-      if ((stlArgKind == kArgComparator) && node.fNumChildren >= 2) {
-         bool shouldDrop = IsDefComp(node, *node.LastChild());
+      do {
+         bool (*checkFn)(const TNode &, const TNode &);
+         if ((stlArgKind == kArgComparator) && node->fNumChildren >= 2) {
+            checkFn = IsDefComp;
+         } else {
+            assert(stlArgKind == kArgHashAndKeyEqual);
+            checkFn = (node->fNumChildren == 3) ? IsDefPred : IsDefHash;
+         }
+         bool shouldDrop = checkFn(*node, *node->LastChild());
          if (shouldDrop)
-            node.DropLastChild();
-      } else if (stlArgKind == kArgHashAndKeyEqual) {
-         const auto checkFn = (node.fNumChildren == 3) ? IsDefPred : IsDefHash;
-         bool shouldDrop = checkFn(node, *node.LastChild());
-         if (shouldDrop)
-            node.DropLastChild();
-      }
+            node->DropLastChild();
+         else
+            break;
+      } while (node->fNumChildren >= 2);
    }
 
    if ((mode & TClassEdit::kDropStd) && ROOT::StartsWith(type.fNamespace, "std::"))
@@ -1652,9 +1724,9 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
    using namespace ROOT::Internal::TypeParsing;
 
 #define DEBUG_ENABLE_TIMER 0
-#define DEBUG_DUMP_DIFFERENCES 0
+#define DEBUG_DUMP_DIFFERENCES 1
 #define DEBUG_DUMP_INPUT 0
-#define DEBUG_ENABLE_OLD 0
+#define DEBUG_ENABLE_OLD 1
 #define DEBUG_ENABLE_NEW 1
 #define DEBUG_DUMP_ERRORS 0
 
@@ -1744,8 +1816,11 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
       }
    }
 
-   ForEachNode(type, [mode](TNode *cur) {
-      ShortTypeHandleSingleNode(*cur, mode);
+   ForEachNode(type, [mode, &tree](TNode *&cur) {
+            auto pTree = cur;
+      ShortTypeHandleSingleNode(tree, cur, mode);
+      if (pTree != cur)
+         Warning("TREE", "cur changed!");
       return true;
    });
 
@@ -1770,15 +1845,16 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
          arglist.ShortType(oldAnswer, mode);
       }
    }
-   answer = oldAnswer;
+   // answer = oldAnswer;
 #endif
 
 #if DEBUG_ENABLE_OLD && DEBUG_ENABLE_NEW && DEBUG_DUMP_DIFFERENCES
-   if (strcmp("::_Storage<_Up,>", typeDesc) == 0) {
-      // if (newAns.str() != oldAnswer) {
-      Error("TClassEdit_Diff", "answer != oldAnswer!\n  mode: %s\n  orig: %s\n  new: `%s`\n  old: `%s`",
-            StringifyMode(mode).c_str(), typeDesc, newAns.str().c_str(), oldAnswer.c_str());
-      R__ASSERT(false);
+   if (strstr(typeDesc, "RDavixFileDes")) {
+      if (newAns.str() != oldAnswer) {
+         Error("TClassEdit_Diff", "answer != oldAnswer!\n  mode: %s\n  orig: %s\n  new: `%s`\n  old: `%s`",
+               StringifyMode(mode).c_str(), typeDesc, newAns.str().c_str(), oldAnswer.c_str());
+         // R__ASSERT(false);
+      }
    }
 #endif
 

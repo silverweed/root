@@ -193,7 +193,7 @@ struct TType {
       kArray,   // first child is the wrapped type, second (optional) child is an expression
    };
 
-   std::string_view fName;
+   std::string fName;
    std::string fNamespace;
    int fFlags = 0;
    EIndirection fIndirection = EIndirection::kNone;
@@ -215,7 +215,7 @@ struct TExpr {
       kParens,
    };
    EType fType = kLeaf;
-   std::string_view fStr;
+   std::string fStr;
 };
 
 std::ostream &operator<<(std::ostream &out, TExpr::EType type);
@@ -295,7 +295,6 @@ static constexpr std::size_t kArenaHeaderSize = sizeof(TNodeArena);
 /// children depending on their nesting (see description in TExpr).
 /// Even though the tree is logically an N-ary tree, internally it is stored as a binary tree where each node points
 /// to its first children and its next sibling.
-/// VERY IMPORTANT NOTE: this structure can only be safely accessed as long as the parsed string is alive.
 struct TNodeTree {
    TNodeArena *fArena = nullptr;
    TNode *fRoot = nullptr;
@@ -340,18 +339,21 @@ std::string StringifyNode(const TNode &node, int flags = kNone);
 
 ROOT::RResult<std::string> ShortType(std::string_view typeDesc);
 
-inline bool ForEachNode(TNode *root, std::function<bool(TNode *)> &&fn)
+inline bool ForEachNode(TNode *root, std::function<bool(TNode *&)> &&fn)
 {
    std::vector<TNode *> toVisit;
    toVisit.push_back(root);
    do {
       TNode *cur = toVisit.back();
       toVisit.pop_back();
+
+      // Run the function before adding the children, as it might modify `cur`.
+      if (!fn(cur))
+         return false;
+
       for (TNode *child = cur->fFirstChild; child; child = child->fNextSibling)
          toVisit.push_back(child);
 
-      if (!fn(cur))
-         return false;
    } while (!toVisit.empty());
    return true;
 }

@@ -983,7 +983,7 @@ static bool ParseTypeArray(TLexer &lex, TNodeTree &tree, TNode *type)
       }
 
       if (tok.fType != kCloseSquare) {
-         tree.fErrors.push_back("unterminated array after type `" + std::string(type->fType.fName) + "`");
+         tree.fErrors.push_back("unterminated array after type `" + type->fType.fName + "`");
          return false;
       }
       lex.Consume();
