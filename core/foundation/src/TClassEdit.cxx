@@ -1541,15 +1541,19 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
             // Graft the resolved type tree into the original node
             if (node == &tree.fNodes[0]) {
                // if this was the top-level node, replace the whole tree.
-               Info("TClassEdit", "Replacing node %s with %s. node before: %p", StringifyNode(*node).c_str(), StringifyNode(resolvedTypeTree.fNodes[0]).c_str(), node);
-               tree = resolvedTypeTree;
-               node = &tree.fNodes[0];
+               Info("TClassEdit", "Replacing node %s with %s. node before: %p", StringifyNode(*node).c_str(), StringifyNode(*resolvedTypeTree.fRoot).c_str(), node);
+               tree = std::move(resolvedTypeTree);
+               node = tree.fRoot;
                Info("TClassEdit", "node after: %p", node);
             } else {
+               #if 0
                R__ASSERT(false); // TEMP
-               auto nodeIdx = tree.fNodes.size();
-               tree.fNodes.insert(tree.fNodes.end(), resolvedTypeTree.fNodes.begin(), resolvedTypeTree.fNodes.end());
-               auto newNode = &tree.fNodes[nodeIdx];
+               #else
+               resolvedTypeTree.fArena->fPrev = tree.fArena->fLast;
+               tree.fArena->fLast = resolvedTypeTree.fArena;
+               resolvedTypeTree.fArena = nullptr;
+               // tree.fNodes.insert(tree.fNodes.end(), resolvedTypeTree.fNodes.begin(), resolvedTypeTree.fNodes.end());
+               auto newNode = resolvedTypeTree.fRoot;
                // Adjust parent/child links for the newnode, its parent and its previous sibling
                newNode->fParent = node->fParent;
                for (TNode **child = &node->fParent->fFirstChild; *child; child = &(*child)->fNextSibling) {
@@ -1560,6 +1564,7 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
                   }
                }
                node = newNode;
+               #endif
             }
          }
       } else {
