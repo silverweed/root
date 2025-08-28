@@ -1514,6 +1514,16 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
    // Before doing any extra work, resolve typedefs if needed.
 #if 1
    if (mode & TClassEdit::kResolveTypedef) {
+      // D::A<B<C>>
+      // ------
+      // D::A<B<C>>
+      //    /    \
+      // D       E::F<G>
+      // -       E::F<G>::A<B<C>>
+      // D::A    E::F<G>::A
+      // B<C>
+      // B
+      // C
       auto type = StringifyNode(*node, kStripCV);
       std::string typeresult;
 
@@ -1568,6 +1578,7 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
             }
          }
       } else {
+         // TEMP
          if (strstr(type.c_str(), "RDavixFileDes"))
             Error("TClassEdit", "Failed to resolve");
       }
