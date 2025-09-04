@@ -104,6 +104,7 @@ class RFieldBase {
                                  const ROOT::RCreateFieldOptions &options, const ROOT::RNTupleDescriptor *desc,
                                  ROOT::DescriptorId_t fieldId);
    friend class ROOT::Experimental::RNTupleAttrSetReader;
+   friend class ROOT::Experimental::RNTupleAttrSetWriter;
 
    using ReadCallback_t = std::function<void(void *)>;
 

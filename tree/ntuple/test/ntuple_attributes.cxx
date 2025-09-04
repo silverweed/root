@@ -778,3 +778,65 @@ TEST(RNTupleAttributes, InvalidPendingRange)
       EXPECT_THAT(ex.what(), testing::HasSubstr("was not created by it or was already committed"));
    }
 }
+
+TEST(RNTupleAttributes, GlobalAttributes)
+{
+   FileRaii fileGuard("test_ntuple_attr_global.root");
+
+   {
+      auto model = RNTupleModel::Create();
+      auto pInt = model->MakeField<int>("int");
+      auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
+      auto writer = RNTupleWriter::Append(std::move(model), "ntpl", *file);
+
+      auto attrModel = RNTupleModel::Create();
+      auto pAttrStr = attrModel->MakeField<std::string>("string");
+      auto pAttrInt = attrModel->MakeField<int>("int");
+      auto attrSet = writer->CreateAttributeSet(std::move(attrModel), "MyAttributes");
+
+      auto globalEntry = attrSet->CreateAttrEntry();
+      auto pGlobAttrStr = globalEntry->GetPtr<std::string>("string");
+      auto pGlobAttrInt = globalEntry->GetPtr<int>("int");
+      *pGlobAttrStr = "The global string";
+      *pGlobAttrInt = 42;
+      attrSet->CommitGlobalRange(*globalEntry);
+
+      ROOT::Experimental::RNTupleAttrPendingRange attrRange;
+      for (int i = 0; i < 100; ++i) {
+         if ((i % 10) == 0) {
+            if (attrRange)
+               attrSet->CommitRange(std::move(attrRange));
+            attrRange = attrSet->BeginRange();
+            *pAttrStr = "Batch " + std::to_string(i / 10);
+            *pAttrInt = i / 10;
+         }
+         *pInt = i;
+         writer->Fill();
+      }
+      if (attrRange)
+         attrSet->CommitRange(std::move(attrRange));
+   }
+
+   auto reader = RNTupleReader::Open("ntpl", fileGuard.GetPath());
+   auto attrSet = reader->OpenAttributeSet("MyAttributes");
+   EXPECT_EQ(attrSet->GetNAttrEntries(), 11);
+
+   auto attrEntry = attrSet->CreateAttrEntry();
+   auto pStr = attrEntry->GetPtr<std::string>("string");
+   auto pInt = attrEntry->GetPtr<int>("int");
+   for (auto i : reader->GetEntryRange()) {
+      int it = 0;
+      for (auto attrIdx : attrSet->GetAttributes(i)) {
+         attrSet->LoadAttrEntry(attrIdx, *attrEntry);
+         if (it == 0) {
+            EXPECT_EQ(*pStr, "The global string");
+            EXPECT_EQ(*pInt, 42);
+         } else {
+            EXPECT_EQ(*pStr, "Batch " + std::to_string(i / 10));
+            EXPECT_EQ(*pInt, i / 10);
+         }
+         ++it;
+      }
+      EXPECT_EQ(it, 2);
+   }
+}

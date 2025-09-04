@@ -36,6 +36,8 @@ namespace ROOT::Internal {
 */
 // clang-format on
 class RColumn {
+   friend class ROOT::Experimental::RNTupleAttrSetWriter;
+
 private:
    ROOT::ENTupleColumnType fType;
    /// Columns belonging to the same field are distinguished by their order.  E.g. for an std::string field, there is

@@ -49,6 +49,10 @@ const char *const kRangeStartName = "_rangeStart";
 const char *const kRangeLenName = "_rangeLen";
 const char *const kUserModelName = "_userModel";
 
+constexpr std::size_t kRangeStartColId = 0;
+constexpr std::size_t kRangeLenColId = 1;
+constexpr std::size_t kUserModelColId = 2;
+
 } // namespace RNTupleAttributes
 
 } // namespace Internal
@@ -200,6 +204,9 @@ class RNTupleAttrSetWriter final {
    /// The model that the user provided on creation. Used to create user-visible entries.
    std::unique_ptr<RNTupleModel> fUserModel;
 
+   /// If true, the first entry of the RNTuple is a "global attribute" entry and needs to be patched at the end
+   bool fHasGlobalRange = false;
+
    /// Creates a RNTupleAttrSetWriter associated to the RNTupleWriter owning `mainFillContext` and writing
    /// in `dir`. `model` is the schema of the AttributeSet.
    static std::unique_ptr<RNTupleAttrSetWriter> Create(std::string_view name, std::unique_ptr<RNTupleModel> model,
@@ -225,6 +232,7 @@ public:
    [[nodiscard]] RNTupleAttrPendingRange BeginRange();
    void CommitRange(RNTupleAttrPendingRange range);
    void CommitRange(RNTupleAttrPendingRange range, REntry &entry);
+   void CommitGlobalRange(REntry &entry);
 
    std::unique_ptr<REntry> CreateAttrEntry() { return fUserModel->CreateEntry(); }
 };

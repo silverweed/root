@@ -47,12 +47,12 @@ std::size_t ROOT::Experimental::Internal::RNTupleAttrEntryPair::Append()
 {
    std::size_t bytesWritten = 0;
    // Write the meta entry values
-   bytesWritten += fMetaEntry.fValues[0].Append(); // XXX: hardcoded
-   bytesWritten += fMetaEntry.fValues[1].Append(); // XXX: hardcoded
+   bytesWritten += fMetaEntry.fValues[kRangeStartColId].Append();
+   bytesWritten += fMetaEntry.fValues[kRangeLenColId].Append();
 
    // Bind the user model's memory to the meta model's subfields
    const auto &userFields =
-      ROOT::Internal::GetFieldZeroOfModel(fMetaModel).GetMutableSubfields()[2]->GetMutableSubfields(); // XXX: hardcoded
+      ROOT::Internal::GetFieldZeroOfModel(fMetaModel).GetMutableSubfields()[kUserModelColId]->GetMutableSubfields();
    assert(userFields.size() == fScopedEntry.fValues.size());
    for (std::size_t i = 0; i < fScopedEntry.fValues.size(); ++i) {
       void *userPtr = fScopedEntry.fValues[i].GetPtr<void>().get();
@@ -137,7 +137,12 @@ void ROOT::Experimental::RNTupleAttrSetWriter::CommitRange(ROOT::Experimental::R
    *pRangeStart = pendingRange.Start();
    *pRangeLen = end - pendingRange.Start();
    Internal::RNTupleAttrEntryPair pair{metaEntry, entry, *fFillContext.fModel};
-   fFillContext.FillImpl(pair);
+
+   // We don't want to flush the cluster until the very end as we might need to patch the first entry (global range).
+   // NOTE: for a real implementation we likely don't want this - rather, we should dedicate the global attribute
+   // its own cluster, so we avoid endlessly growing the memory in the edge case of a lot of attributes.
+   ROOT::RNTupleFillStatus fillStatus;
+   fFillContext.FillNoFlushImpl(pair, fillStatus);
 }
 
 void ROOT::Experimental::RNTupleAttrSetWriter::CommitRange(ROOT::Experimental::RNTupleAttrPendingRange pendingRange)
@@ -145,8 +150,29 @@ void ROOT::Experimental::RNTupleAttrSetWriter::CommitRange(ROOT::Experimental::R
    CommitRange(std::move(pendingRange), fUserModel->GetDefaultEntry());
 }
 
+void ROOT::Experimental::RNTupleAttrSetWriter::CommitGlobalRange(REntry &entry)
+{
+   if (fHasGlobalRange) // TODO: overwrite
+      throw ROOT::RException(R__FAIL("Already written global attributes!"));
+
+   if (fFillContext.GetNEntries() > 0)
+      throw ROOT::RException(R__FAIL("Can only write global attributes as the first entry!"));
+
+   CommitRange(RNTupleAttrPendingRange{0, fFillContext.GetModel().GetModelId()}, entry);
+   fHasGlobalRange = true;
+}
+
 void ROOT::Experimental::RNTupleAttrSetWriter::Commit()
 {
+   if (fHasGlobalRange) {
+      // patch up global range to include all the entries
+      const auto &lenField = fFillContext.GetModel().GetConstField(kRangeLenName);
+      auto &page = lenField.fAvailableColumns[0]->fWritePage;
+      R__ASSERT(page.GetNElements() > 0 && page.GetElementSize() == sizeof(NTupleSize_t));
+      auto buf = static_cast<NTupleSize_t *>(page.GetBuffer());
+      *buf = fMainFillContext->GetNEntries();
+   }
+
    fFillContext.FlushCluster();
    fFillContext.fSink->CommitClusterGroup();
    fFillContext.fSink->CommitDataset();
@@ -160,7 +186,7 @@ ROOT::Experimental::RNTupleAttrSetReader::RNTupleAttrSetReader(std::unique_ptr<R
 {
    // Initialize user model
    fUserModel = RNTupleModel::Create();
-   const auto *userFieldRoot = fReader->GetModel().GetConstFieldZero().GetConstSubfields()[2]; // XXX: hardcoded
+   const auto *userFieldRoot = fReader->GetModel().GetConstFieldZero().GetConstSubfields()[kUserModelColId];
    for (const auto *field : userFieldRoot->GetConstSubfields()) {
       fUserModel->AddField(field->Clone(field->GetFieldName()));
    }
@@ -298,11 +324,11 @@ ROOT::Experimental::RNTupleAttrSetReader::LoadAttrEntry(ROOT::NTupleSize_t index
       throw RException(R__FAIL("mismatch between entry and model"));
 
    // Load the meta fields
-   metaEntry.fValues[0].Read(index); // XXX: hardcoded
-   metaEntry.fValues[1].Read(index); // XXX: hardcoded
+   metaEntry.fValues[kRangeStartColId].Read(index);
+   metaEntry.fValues[kRangeLenColId].Read(index);
 
    // Load the user fields into `entry`
-   auto *userRootField = ROOT::Internal::GetFieldZeroOfModel(metaModel).GetMutableSubfields()[2]; // XXX: hardcoded
+   auto *userRootField = ROOT::Internal::GetFieldZeroOfModel(metaModel).GetMutableSubfields()[kUserModelColId];
    const auto userFields = userRootField->GetMutableSubfields();
    assert(entry.fValues.size() == userFields.size());
    for (std::size_t i = 0; i < userFields.size(); ++i) {

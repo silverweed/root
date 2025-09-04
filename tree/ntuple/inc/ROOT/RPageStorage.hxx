@@ -58,6 +58,7 @@ ROOT::Internal::RMiniFileReader *GetUnderlyingReader(ROOT::Internal::RPageSource
 
 namespace Experimental {
 class RNTupleAttrSetReader;
+class RNTupleAttrSetWriter;
 }
 
 namespace Internal {
@@ -456,6 +457,8 @@ public:
 */
 // clang-format on
 class RPagePersistentSink : public RPageSink {
+   friend class ROOT::Experimental::RNTupleAttrSetWriter;
+
 private:
    /// Used to map the IDs of the descriptor to the physical IDs issued during header/footer serialization
    ROOT::Internal::RNTupleSerializer::RContext fSerializationContext;
