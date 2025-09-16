@@ -30,6 +30,7 @@
 #include <RVersion.h>
 #include <TDirectory.h>
 #include <TError.h>
+#include <TKey.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -697,4 +698,41 @@ ROOT::Internal::RPageSourceFile::LoadClusters(std::span<RCluster::RKey> clusterK
 void ROOT::Internal::RPageSourceFile::LoadStreamerInfo()
 {
    fReader.LoadStreamerInfo();
+}
+
+ROOT::Experimental::RNTupleAttrSetDescriptor ROOT::Internal::RPageSinkFile::CommitAttributeSetInternal()
+{
+   TDirectory *dir = GetUnderlyingDirectory();
+   R__ASSERT(dir);
+   const std::string &attrSetName = GetNTupleName();
+   const TKey *key = dir->GetKey(attrSetName.c_str());
+   R__ASSERT(key);
+   RNTupleLocator locator;
+   locator.SetType(RNTupleLocator::kTypeFile);
+   locator.SetNBytesOnStorage(key->GetNbytes() - key->GetKeylen());
+   // Set the position to the start of the payload
+   locator.SetPosition(static_cast<std::uint64_t>(key->GetSeekKey() + key->GetKeylen()));
+   auto uncompLen = static_cast<std::uint64_t>(key->GetObjlen());
+   // TODO: move these to a better place
+   constexpr auto kSchemaVersionMajor = 1;
+   constexpr auto kSchemaVersionMinor = 0;
+   ROOT::Experimental::Internal::RNTupleAttrSetDescriptorBuilder builder;
+   builder.SchemaVersion(kSchemaVersionMajor, kSchemaVersionMinor)
+      .AnchorLength(uncompLen)
+      .AnchorLocator(locator)
+      .Name(attrSetName);
+   return builder.MoveDescriptor().Unwrap();
+}
+
+void ROOT::Internal::RPageSinkFile::CommitAttributeSet(RPageSink &attrSink)
+{
+   auto desc = attrSink.CommitAttributeSetInternal();
+   const auto attrSetName = desc.GetName();
+   fDescriptorBuilder.AddAttributeSet(std::move(desc)).ThrowOnError();
+
+   // Remove the newly added key from the Keys List to hide it
+   auto dir = GetUnderlyingDirectory();
+   auto key = dir->GetListOfKeys()->FindObject(attrSetName.c_str());
+   R__ASSERT(key);
+   dir->GetListOfKeys()->Remove(key);
 }

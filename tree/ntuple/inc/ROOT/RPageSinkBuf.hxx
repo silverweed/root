@@ -146,6 +146,8 @@ public:
    void CommitStagedClusters(std::span<RStagedCluster> clusters) final;
    void CommitClusterGroup() final;
    void CommitDatasetImpl() final;
+   void CommitAttributeSet(RPageSink &) final;
+   ROOT::Experimental::RNTupleAttrSetDescriptor CommitAttributeSetInternal() final;
 
    RPage ReservePage(ColumnHandle_t columnHandle, std::size_t nElements) final;
 

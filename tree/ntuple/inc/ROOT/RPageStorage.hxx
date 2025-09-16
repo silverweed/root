@@ -47,10 +47,22 @@ namespace ROOT {
 class RNTupleModel;
 
 namespace Internal {
+
 class RColumn;
-class RMiniFileReader;
 class RPageAllocator;
+class RMiniFileReader;
+class RPageSource;
+class RPagePersistentSink;
+class RRawFile;
+
 struct RNTupleModelChangeset;
+} // namespace Internal
+
+namespace Experimental::Internal {
+ROOT::Internal::RMiniFileReader *GetUnderlyingReader(ROOT::Internal::RPageSource &pageSource);
+} // namespace Experimental::Internal
+
+namespace Internal {
 
 enum class EPageStorageType {
    kSink,
@@ -389,6 +401,12 @@ public:
    /// Write out the page locations (page list envelope) for all the committed clusters since the last call of
    /// CommitClusterGroup (or the beginning of writing).
    virtual void CommitClusterGroup() = 0;
+   /// Given the Attribute Set's PageSink, adds its information (name + locator) into the main RNTuple's descriptor.
+   /// The Attribute Set must already have been written to storage via `RNTupleAttrSetWriter::Commit()`.
+   // TODO: make this pure virtual
+   virtual void CommitAttributeSet(RPageSink & /* attrSink */) {}
+   // TODO: make this pure virtual (also probably not public)
+   virtual ROOT::Experimental::RNTupleAttrSetDescriptor CommitAttributeSetInternal() { return {}; }
 
    /// The registered callback is executed at the beginning of CommitDataset();
    void RegisterOnCommitDatasetCallback(Callback_t callback) { fOnDatasetCommitCallbacks.emplace_back(callback); }
@@ -832,6 +850,8 @@ public:
    /// Forces the loading of ROOT StreamerInfo from the underlying file. This currently only has an effect for
    /// TFile-backed sources.
    virtual void LoadStreamerInfo() = 0;
+
+   std::unique_ptr<RPageSource> ReadAttributeSet(ROOT::RNTupleLocator locator, std::uint64_t uncomPLen);
 }; // class RPageSource
 
 } // namespace Internal

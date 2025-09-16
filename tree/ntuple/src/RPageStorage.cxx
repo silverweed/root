@@ -1297,3 +1297,22 @@ void ROOT::Internal::RPagePersistentSink::EnableDefaultMetrics(const std::string
       *fMetrics.MakeCounter<RNTupleTickCounter<RNTupleAtomicCounter> *>("timeCpuZip", "ns",
                                                                         "CPU time spent compressing")});
 }
+
+std::unique_ptr<ROOT::Internal::RPageSource>
+ROOT::Internal::RPageSource::ReadAttributeSet(ROOT::RNTupleLocator locator, std::uint64_t uncompLen)
+{
+   ROOT::Internal::RMiniFileReader *reader = GetUnderlyingReader();
+   // #TODO(gparolini)
+   if (!reader)
+      throw ROOT::RException(R__FAIL("GetAttributeSet is only supported for file-based page sources"));
+
+   assert(locator.GetType() == RNTupleLocator::kTypeFile);
+   auto attrAnchor =
+      reader->GetNTupleProperAtOffset(locator.GetPosition<std::uint64_t>(), locator.GetNBytesOnStorage(), uncompLen)
+         .Unwrap();
+
+   // NOTE: this static_cast assumes that GetUnderlyingReader() returns non-null only for RPageSourceFile.
+   // This should be made more robust. Maybe just make this method virtual?
+   auto attrSource = static_cast<Internal::RPageSourceFile &>(*this).OpenWithDifferentAnchor(attrAnchor);
+   return attrSource;
+}
