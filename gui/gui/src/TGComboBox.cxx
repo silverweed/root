@@ -286,10 +286,7 @@ TGComboBox::~TGComboBox()
 
 void TGComboBox::Init()
 {
-   fBpic = fClient->GetPicture("arrow_down.xpm");
-
-   if (!fBpic)
-      Error("TGComboBox", "arrow_down.xpm not found");
+   fBpic = fClient->GetPictureOrEmpty("arrow_down.xpm");
 
    fDDButton = new TGScrollBarElement(this, fBpic, kDefaultScrollBarWidth,
                                       kDefaultScrollBarWidth, kRaisedFrame);

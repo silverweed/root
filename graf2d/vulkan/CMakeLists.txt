@@ -1,6 +1,7 @@
 find_package(glfw3 3 REQUIRED)
 
-add_compile_options(-Wno-error) # TEMP
+# @Temporary: remove this
+add_compile_options(-Wno-error)
 add_subdirectory(rvulkan)
 
 ROOT_STANDARD_LIBRARY_PACKAGE(GVulkan
@@ -9,19 +10,10 @@ ROOT_STANDARD_LIBRARY_PACKAGE(GVulkan
   SOURCES
     src/TGVulkan.cxx
   LIBRARIES
-    ${Vulkan_LIBRARIES}
-    glfw #${GLFW_LIBRARIES}
-    ${FREETYPE_LIBRARIES}
-    RVulkan
-    ${CMAKE_THREAD_LIBS_INIT}
+    Freetype::Freetype
   DEPENDENCIES
     Core
-    #MathCore
-  #INSTALL_OPTIONS
-    #FILTER "inc/X11/"
-    #FILTER "X11$"
 )
 
-target_include_directories(GVulkan PRIVATE ${Vulkan_INCLUDE_DIR})
-target_include_directories(GVulkan PRIVATE ${FREETYPE_INCLUDE_DIR})
-target_include_directories(GVulkan PRIVATE "${PROJECT_SOURCE_DIR}/graf2d/vulkan/rvulkan/inc")
+# Don't install the private RVulkan lib
+target_link_libraries(GVulkan PRIVATE RVulkan glfw)

@@ -67,12 +67,17 @@ const RVkFont *RVkFonts::LoadFont(const char *fontName)
 // -----------------------------------------
 TGVulkan::TGVulkan(const char *name, const char *title) : TVirtualX(name, title) {}
 
+Int_t TGVulkan::OpenDisplay(const char *dpyName)
+{
+   // init GLFW and create window
+   void *display = new RVkWindow(800, 600, dpyName);
+   bool ok = Init(display);
+   return ok ? 1 : -1;
+}
+
 Bool_t TGVulkan::Init(void *display)
 {
-   (void)display;
-
-   // init GLFW
-   fWindow = RVkWindow(800, 600, "RVulkan test");
+   fWindow = std::unique_ptr<RVkWindow> { static_cast<RVkWindow *>(display) };
    if (!fWindow)
       return false;
 

@@ -63,7 +63,7 @@ public:
 // Interface to TVirtualX
 class TGVulkan : public TVirtualX {
   // These get created in Init()
-  std::optional<RVkWindow> fWindow;
+  std::unique_ptr<RVkWindow> fWindow;
   std::optional<RVulkan> fVk;
 
   RVkFonts fFonts;
@@ -73,10 +73,11 @@ public:
 
   // TVirtualX impl
   // -----------------------------------------
+  Int_t OpenDisplay(const char *dpyName) override;
   Bool_t Init(void *display) override;
   void ClearWindow() override;
 
   FontStruct_t LoadQueryFont(const char *font_name) override;
 
-  //ClassDefOverride(TGVulkan, 2);
+  ClassDefOverride(TGVulkan, 0);
 };
