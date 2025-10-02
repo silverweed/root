@@ -49,6 +49,10 @@ namespace Detail {
 class RRawPtrWriteEntry;
 } // namespace Detail
 
+namespace Internal {
+class RNTupleAttrEntryPair;
+}
+
 } // namespace Experimental
 
 namespace Internal {
@@ -746,6 +750,7 @@ public:
 class RFieldBase::RValue final {
    friend class RFieldBase;
    friend class ROOT::REntry;
+   friend class ROOT::Experimental::Internal::RNTupleAttrEntryPair;
 
 private:
    RFieldBase *fField = nullptr;  ///< The field that created the RValue

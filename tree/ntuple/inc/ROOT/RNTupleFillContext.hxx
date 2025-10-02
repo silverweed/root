@@ -31,6 +31,10 @@
 
 namespace ROOT {
 
+namespace Experimental {
+class RNTupleAttrSetWriter;
+}
+
 // clang-format off
 /**
 \class ROOT::RNTupleFillContext
@@ -47,8 +51,9 @@ sequential writing, please refer to RNTupleWriter.
 */
 // clang-format on
 class RNTupleFillContext {
-   friend class ROOT::RNTupleWriter;
+   friend class RNTupleWriter;
    friend class RNTupleParallelWriter;
+   friend class Experimental::RNTupleAttrSetWriter;
 
 private:
    /// The page sink's parallel page compression scheduler if IMT is on.
@@ -100,7 +105,7 @@ private:
    std::size_t FillImpl(Entry &entry)
    {
       ROOT::RNTupleFillStatus status;
-      FillNoFlush(entry, status);
+      FillNoFlushImpl(entry, status);
       if (status.ShouldFlushCluster())
          FlushCluster();
       return status.GetLastEntrySize();
@@ -111,6 +116,8 @@ private:
    RNTupleFillContext &operator=(const RNTupleFillContext &) = delete;
 
 public:
+   RNTupleFillContext(RNTupleFillContext &&) = default;
+   RNTupleFillContext &operator=(RNTupleFillContext &&) = default;
    ~RNTupleFillContext();
 
    /// Fill an entry into this context, but don't commit the cluster. The calling code must pass an RNTupleFillStatus
