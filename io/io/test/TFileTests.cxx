@@ -4,6 +4,8 @@
 
 #include "gtest/gtest.h"
 
+#include <ROOT/TestSupport.hxx>
+
 #include "TFile.h"
 #include "TMemFile.h"
 #include "TDirectory.h"
@@ -37,6 +39,62 @@ TEST(TFile, WriteObjectTObject)
    EXPECT_STREQ(keyptr->GetTitle(), tnamed_title);
 
    input.Close();
+   gSystem->Unlink(filename);
+}
+
+TEST(TFile, UpdateExisting)
+{
+   auto filename{"tfile_updateexisting.root"};
+   auto tnamed_name1{"mytnamed_name1"};
+   auto tnamed_title1{"mytnamed_title1"};
+   auto tnamed_name2{"mytnamed_name2"};
+   auto tnamed_title2{"mytnamed_title2"};
+
+   {
+      TNamed mytnamed{tnamed_name1, tnamed_title1};
+      TFile f{filename, "recreate"};
+      f.WriteObject(&mytnamed, mytnamed.GetName());
+   }
+
+   {
+      TNamed mytnamed{tnamed_name2, tnamed_title2};
+      TFile f{filename, "update_existing"};
+      f.WriteObject(&mytnamed, mytnamed.GetName());
+   }
+
+   TFile input{filename};
+
+   auto named1 = input.Get<TNamed>(tnamed_name1);
+   auto keyptr1 = static_cast<TKey *>(input.GetListOfKeys()->At(0));
+   EXPECT_STREQ(named1->GetName(), tnamed_name1);
+   EXPECT_STREQ(named1->GetTitle(), tnamed_title1);
+   EXPECT_STREQ(keyptr1->GetName(), tnamed_name1);
+   EXPECT_STREQ(keyptr1->GetTitle(), tnamed_title1);
+
+   auto named2 = input.Get<TNamed>(tnamed_name2);
+   auto keyptr2 = static_cast<TKey *>(input.GetListOfKeys()->At(1));
+   EXPECT_STREQ(named2->GetName(), tnamed_name2);
+   EXPECT_STREQ(named2->GetTitle(), tnamed_title2);
+   EXPECT_STREQ(keyptr2->GetName(), tnamed_name2);
+   EXPECT_STREQ(keyptr2->GetTitle(), tnamed_title2);
+
+   input.Close();
+   gSystem->Unlink(filename);
+}
+
+TEST(TFile, UpdateExistingNonExisting)
+{
+   auto filename{"tfile_updateexisting_nonexisting.root"};
+   {
+      ROOT::TestSupport::CheckDiagsRAII diags;
+      diags.requiredDiag(kSysError, "TFile::TFile", "can not be opened", false);
+      TFile f{filename, "update_existing"};
+      EXPECT_TRUE(f.IsZombie());
+   }
+   {
+      TFile f{filename, "update"};
+      EXPECT_FALSE(f.IsZombie());
+   }
    gSystem->Unlink(filename);
 }
 

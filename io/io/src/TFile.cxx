@@ -207,6 +207,7 @@ TFile::TFile() : TDirectoryFile(), fCompress(ROOT::RCompressionSetting::EAlgorit
       Info("TFile", "default ctor");
 }
 
+// clang-format off
 ////////////////////////////////////////////////////////////////////////////////
 /// Opens or creates a local ROOT file.
 ///
@@ -228,6 +229,7 @@ TFile::TFile() : TDirectoryFile(), fCompress(ROOT::RCompressionSetting::EAlgorit
 /// NEW or CREATE                     | Create a new file and open it for writing, if the file already exists the file is not opened.
 /// RECREATE                          | Create a new file, if the file already exists it will be overwritten.
 /// UPDATE                            | Open an existing file for writing. If no file exists, it is created.
+/// UPDATE_EXISTING                   | Open an existing file for writing. If no file exists, it is an error.
 /// READ                              | Open an existing file for reading (default).
 /// NET                               | Used by derived remote file access classes, not a user callable option.
 /// WEB                               | Used by derived remote http access class, not a user callable option.
@@ -339,6 +341,7 @@ TFile::TFile() : TDirectoryFile(), fCompress(ROOT::RCompressionSetting::EAlgorit
 /// ~~~{.cpp}
 ///   TFile *f = TFile::Open("tmpname.root?reproducible=fixedname","RECREATE","File title");
 /// ~~~
+// clang-format on
 
 TFile::TFile(const char *fname1, Option_t *option, const char *ftitle, Int_t compress)
            : TDirectoryFile(), fCompress(compress), fUrl(fname1,kTRUE)
@@ -437,10 +440,12 @@ TFile::TFile(const char *fname1, Option_t *option, const char *ftitle, Int_t com
    if (fOption == "NEW")
       fOption = "CREATE";
 
-   Bool_t create   = (fOption == "CREATE") ? kTRUE : kFALSE;
-   Bool_t recreate = (fOption == "RECREATE") ? kTRUE : kFALSE;
-   Bool_t update   = (fOption == "UPDATE") ? kTRUE : kFALSE;
-   Bool_t read     = (fOption == "READ") ? kTRUE : kFALSE;
+   Bool_t create = (fOption == "CREATE");
+   Bool_t recreate = (fOption == "RECREATE");
+   Bool_t update = (fOption == "UPDATE");
+   Bool_t read = (fOption == "READ");
+   Bool_t updateExisting = (fOption == "UPDATE_EXISTING");
+   update |= updateExisting;
    if (!create && !recreate && !update && !read) {
       read    = kTRUE;
       fOption = "READ";
@@ -532,10 +537,13 @@ TFile::TFile(const char *fname1, Option_t *option, const char *ftitle, Int_t com
 
    // Connect to file system stream
    if (create || update) {
+      auto commonFlags = O_RDWR;
+      if (!updateExisting)
+         commonFlags |= O_CREAT;
 #ifndef WIN32
-      fD = TFile::SysOpen(fname.Data(), O_RDWR | O_CREAT, 0644);
+      fD = TFile::SysOpen(fname.Data(), commonFlags, 0644);
 #else
-      fD = TFile::SysOpen(fname.Data(), O_RDWR | O_CREAT | O_BINARY, S_IREAD | S_IWRITE);
+      fD = TFile::SysOpen(fname.Data(), commonFlags | O_BINARY, S_IREAD | S_IWRITE);
 #endif
       if (fD == -1) {
          SysError("TFile", "file %s can not be opened", fname.Data());
