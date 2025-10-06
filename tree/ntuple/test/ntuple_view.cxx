@@ -612,3 +612,29 @@ TEST(RNTuple, VoidWithExternalAddressAndTypeName)
       EXPECT_THAT(err.what(), testing::HasSubstr("unexpected on-disk type"));
    }
 }
+
+TEST(RNTuple, ViewStreamer)
+{
+   FileRaii fileGuard("test_ntuple_view_streamer.root");
+   {
+      auto model = RNTupleModel::Create();
+      model->AddField(std::make_unique<ROOT::RStreamerField>("foo", "CustomStruct"));
+      auto ntuple = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard.GetPath());
+      auto fieldFoo = ntuple->GetModel().GetDefaultEntry().GetPtr<CustomStruct>("foo");
+      for (int i = 0; i < 10; ++i) {
+         CustomStruct foo;
+         foo.v1.push_back(i);
+         foo.s = std::to_string(i);
+         *fieldFoo = foo;
+         ntuple->Fill();
+      }
+   }
+
+   auto reader = RNTupleReader::Open("ntuple", fileGuard.GetPath());
+   auto vFoo = reader->GetView<CustomStruct>("foo");
+   for (auto i : reader->GetEntryRange()) {
+      auto foo = vFoo(i);
+      EXPECT_EQ(foo.v1, std::vector<float>{(float)i});
+      EXPECT_EQ(foo.s, std::to_string(i));
+   }
+}
