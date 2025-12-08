@@ -233,7 +233,10 @@ std::unique_ptr<RFile> RFile::Recreate(std::string_view path)
 
 RFile::RFile(std::unique_ptr<TFile> file) : fFile(std::move(file)) {}
 
-RFile::~RFile() = default;
+RFile::~RFile()
+{
+   Close();
+}
 
 TKey *RFile::GetTKey(std::string_view path) const
 {
@@ -387,6 +390,31 @@ void RFile::PutUntyped(std::string_view pathSV, const std::type_info &type, cons
    }
 }
 
+void ROOT::Experimental::RFile::AddUntyped(std::string_view pathSV, RPendingObject obj)
+{
+   std::string path{pathSV};
+   if (auto err = ValidateAndNormalizePath(path); !err.empty())
+      throw RException(R__FAIL("invalid object path '" + path + "': " + err));
+
+   if (path.find_first_of(';') != std::string_view::npos) {
+      throw RException(
+         R__FAIL("invalid object path '" + path +
+                 "': character ';' is used to specify an object cycle, which only makes sense when reading."));
+   }
+
+   if (!fFile)
+      throw ROOT::RException(R__FAIL("File has been closed"));
+
+   if (!fFile->IsWritable())
+      throw ROOT::RException(R__FAIL("File is not writable"));
+
+   auto [_it, inserted] = fPendingObjects.try_emplace(std::string(path), obj);
+   if (!inserted) {
+      throw ROOT::RException(
+         R__FAIL("an object with path `" + std::string(path) + "` was already Added to this RFile."));
+   }
+}
+
 ROOT::Experimental::RFileKeyIterable::RIterator::RIterStackElem::RIterStackElem(TIterator *it, const std::string &path)
    : fIter(it), fDirPath(path)
 {
@@ -522,12 +550,24 @@ void RFile::Print(std::ostream &out) const
 
 size_t RFile::Flush()
 {
+   if (!fFile)
+      throw ROOT::RException(R__FAIL("file was flushed after being closed!"));
+
+   if (!fFile->IsWritable())
+      throw ROOT::RException(R__FAIL("cannot Flush a read-only file"));
+
+   for (auto [path, obj] : fPendingObjects) {
+      PutUntyped(path, obj.fTypeInfo, obj.fObj.get(), kPutFlagsNone);
+   }
+   fPendingObjects.clear();
    return fFile->Write();
 }
 
 void RFile::Close()
 {
-   // NOTE: this also flushes the file internally
+   if (fFile && fFile->IsWritable()) {
+      Flush();
+   }
    fFile.reset();
 }
 

@@ -77,7 +77,7 @@ TEST(RFile, OpenInexistent)
    ROOT::TestSupport::CheckDiagsRAII diags;
    diags.optionalDiag(kSysError, "TFile::TFile", "", false);
    diags.optionalDiag(kError, "TFile::TFile", "", false);
-   
+
    try {
       auto f = RFile::Open("does_not_exist.root");
       FAIL() << "trying to open an inexistent file should throw";
@@ -685,7 +685,7 @@ TEST(RFile, GetKeyInfo)
 
    EXPECT_EQ(file->GetKeyInfo("foo"), std::nullopt);
 
-   for (const std::string_view path : { "/s", "a/b/c", "b", "/a/d" }) {
+   for (const std::string_view path : {"/s", "a/b/c", "b", "/a/d"}) {
       auto key = file->GetKeyInfo(path);
       ASSERT_NE(key, std::nullopt);
       EXPECT_EQ(key->GetPath(), path[0] == '/' ? path.substr(1) : path);
@@ -693,4 +693,26 @@ TEST(RFile, GetKeyInfo)
       EXPECT_EQ(key->GetTitle(), "");
       EXPECT_EQ(key->GetCycle(), 1);
    }
+}
+
+TEST(RFile, WriteDelayed)
+{
+   FileRaii fileGuard("test_file_writedelayed.root");
+
+   {
+      auto h = std::make_shared<TH1D>("h", "h", 10, 0, 1);
+      auto file = RFile::Recreate(fileGuard.GetPath());
+      file->Add(h->GetName(), h);
+
+      // Cannot Add multiple objects with the same path
+      auto h2 = std::make_shared<TH1D>("h2", "h2", 10, 0, 1);
+      EXPECT_THROW(file->Add(h->GetName(), h2), ROOT::RException);
+
+      h->FillRandom("gaus", 100);
+   }
+
+   auto file = RFile::Open(fileGuard.GetPath());
+   auto h = file->Get<TH1D>("h");
+   ASSERT_NE(h, nullptr);
+   EXPECT_DOUBLE_EQ(h->GetEntries(), 100);
 }

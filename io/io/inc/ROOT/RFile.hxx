@@ -50,7 +50,7 @@ namespace Detail {
 /// This function does not perform any copy: the returned string_views have the same lifetime as `path`.
 std::pair<std::string_view, std::string_view> DecomposePath(std::string_view path);
 
-}
+} // namespace Detail
 
 class RFileKeyIterable;
 
@@ -227,13 +227,25 @@ class RFile final {
 
    /// Flags used in PutInternal()
    enum PutFlags {
+      kPutFlagsNone = 0,
       /// When encountering an object at the specified path, overwrite it with the new one instead of erroring out.
       kPutAllowOverwrite = 0x1,
       /// When overwriting an object, preserve the existing one and create a new cycle, rather than removing it.
       kPutOverwriteKeepCycle = 0x2,
    };
 
+   struct RPendingObject {
+      std::shared_ptr<void> fObj;
+      const std::type_info &fTypeInfo;
+
+      template <typename T>
+      explicit RPendingObject(std::shared_ptr<T> obj) : fObj(obj), fTypeInfo(typeid(T))
+      {
+      }
+   };
+
    std::unique_ptr<TFile> fFile;
+   std::unordered_map<std::string, RPendingObject> fPendingObjects;
 
    // Outlined to avoid including TFile.h
    explicit RFile(std::unique_ptr<TFile> file);
@@ -244,9 +256,13 @@ class RFile final {
                                   std::variant<const char *, std::reference_wrapper<const std::type_info>> type) const;
 
    /// Writes `obj` to file, without taking its ownership.
+   /// `flags` is a bitmask of PutFlags.
    void PutUntyped(std::string_view path, const std::type_info &type, const void *obj, std::uint32_t flags);
 
+   void AddUntyped(std::string_view path, RPendingObject obj);
+
    /// \see Put
+   /// `flags` is a bitmask of PutFlags.
    template <typename T>
    void PutInternal(std::string_view path, const T &obj, std::uint32_t flags)
    {
@@ -327,6 +343,15 @@ public:
       std::uint32_t flags = kPutAllowOverwrite;
       flags |= backupPrevious * kPutOverwriteKeepCycle;
       PutInternal(path, obj, flags);
+   }
+
+   /// Registers `obj` to the RFile so that it's written to it when the file is first flushed (which either happens
+   /// explicitly through Flush() or Close() or implicitly by destroying the RFile).
+   template <typename T>
+   void Add(std::string_view path, std::shared_ptr<T> obj)
+   {
+      RPendingObject pendingObj{obj};
+      AddUntyped(path, pendingObj);
    }
 
    /// Writes all objects and the file structure to disk.
