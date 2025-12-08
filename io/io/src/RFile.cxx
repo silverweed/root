@@ -175,7 +175,7 @@ static void EnsureFileOpenAndBinary(const TFile *tfile, std::string_view path)
       throw ROOT::RException(R__FAIL("failed to open file " + std::string(path) + " for reading"));
 
    if (tfile->IsRaw() || !tfile->IsBinary() || tfile->IsArchive())
-      throw ROOT::RException(R__FAIL("Opened file " + std::string(path) + " is not a ROOT binary file"));
+      throw ROOT::RException(R__FAIL("opened file " + std::string(path) + " is not a ROOT binary file"));
 }
 
 static std::string ReconstructFullKeyPath(const TKey &key)
@@ -284,7 +284,7 @@ void *RFile::GetUntyped(std::string_view path,
                         std::variant<const char *, std::reference_wrapper<const std::type_info>> type) const
 {
    if (!fFile)
-      throw ROOT::RException(R__FAIL("File has been closed"));
+      throw ROOT::RException(R__FAIL("file has been closed"));
 
    std::string pathStr{path};
 
@@ -298,7 +298,7 @@ void *RFile::GetUntyped(std::string_view path,
       throw ROOT::RException(R__FAIL(std::string("Could not determine type of object ") + pathStr));
 
    if (auto err = ValidateAndNormalizePath(pathStr); !err.empty())
-      throw RException(R__FAIL("Invalid object pathStr '" + pathStr + "': " + err));
+      throw RException(R__FAIL("invalid object pathStr '" + pathStr + "': " + err));
 
    TKey *key = GetTKey(pathStr);
    void *obj = key ? key->ReadObjectAny(cls) : nullptr;
@@ -324,19 +324,19 @@ void RFile::PutUntyped(std::string_view pathSV, const std::type_info &type, cons
 
    std::string path{pathSV};
    if (auto err = ValidateAndNormalizePath(path); !err.empty())
-      throw RException(R__FAIL("Invalid object path '" + path + "': " + err));
+      throw RException(R__FAIL("invalid object path '" + path + "': " + err));
 
    if (path.find_first_of(';') != std::string_view::npos) {
       throw RException(
-         R__FAIL("Invalid object path '" + path +
+         R__FAIL("invalid object path '" + path +
                  "': character ';' is used to specify an object cycle, which only makes sense when reading."));
    }
 
    if (!fFile)
-      throw ROOT::RException(R__FAIL("File has been closed"));
+      throw ROOT::RException(R__FAIL("file has been closed"));
 
    if (!fFile->IsWritable())
-      throw ROOT::RException(R__FAIL("File is not writable"));
+      throw ROOT::RException(R__FAIL("file is not writable"));
 
    // If `path` refers to a subdirectory, make sure we always write in an actual TDirectory,
    // otherwise we may have a mix of top-level objects called "a/b/c" and actual directory
