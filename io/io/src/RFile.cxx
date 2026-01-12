@@ -557,7 +557,7 @@ size_t RFile::Flush()
       throw ROOT::RException(R__FAIL("cannot Flush a read-only file"));
 
    for (auto [path, obj] : fPendingObjects) {
-      PutUntyped(path, obj.fTypeInfo, obj.fObj.get(), kPutFlagsNone);
+      PutUntyped(path, obj.fTypeInfo, obj.fObj.get(), kPutAllowOverwrite | kPutKeepCycle);
    }
    fPendingObjects.clear();
    return fFile->Write();

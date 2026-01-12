@@ -716,3 +716,54 @@ TEST(RFile, WriteDelayed)
    ASSERT_NE(h, nullptr);
    EXPECT_DOUBLE_EQ(h->GetEntries(), 100);
 }
+
+TEST(RFile, WriteDelayedFlushTwice)
+{
+   FileRaii fileGuard("test_file_writedelayed_flushtwice.root");
+
+   {
+      auto h = std::make_shared<TH1D>("h", "h", 10, 0, 1);
+      auto file = RFile::Recreate(fileGuard.GetPath());
+      file->Add(h->GetName(), h);
+
+      h->Fill(2.0);
+
+      // explicitly flush the file: this writes `h` and removes it from the pending list.
+      file->Flush();
+
+      // this second modification will not be seen by the file.
+      h->Fill(3.0);
+   }
+
+   auto file = RFile::Open(fileGuard.GetPath());
+   auto h = file->Get<TH1D>("h");
+   ASSERT_NE(h, nullptr);
+   EXPECT_DOUBLE_EQ(h->GetEntries(), 1);
+}
+
+TEST(RFile, WriteDelayedAfterPut)
+{
+   FileRaii fileGuard("test_file_writedelayed_afterput.root");
+
+   {
+      auto h = std::make_shared<TH1D>("h", "h", 10, 0, 1);
+      auto file = RFile::Recreate(fileGuard.GetPath());
+      h->Fill(2.0);
+      file->Put("h", *h);
+
+      // Calling Add after Put is legal: the old object will be overwritten.
+      file->Add(h->GetName(), h);
+
+      h->Fill(3.0);
+   }
+
+   auto file = RFile::Open(fileGuard.GetPath());
+   auto h = file->Get<TH1D>("h");
+   ASSERT_NE(h, nullptr);
+   EXPECT_DOUBLE_EQ(h->GetEntries(), 2);
+
+   // The old object should still be there
+   h = file->Get<TH1D>("h;1");
+   ASSERT_NE(h, nullptr);
+   EXPECT_DOUBLE_EQ(h->GetEntries(), 1);
+}

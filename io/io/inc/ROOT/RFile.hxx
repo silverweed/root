@@ -347,6 +347,16 @@ public:
 
    /// Registers `obj` to the RFile so that it's written to it when the file is first flushed (which either happens
    /// explicitly through Flush() or Close() or implicitly by destroying the RFile).
+   ///
+   /// When the file is flushed, all Added objects will overwrite any previously-existing objects with the same name
+   /// (preserving the old objects as separate cycles). In other words, calling `file->Put("foo", obj1)` followed by
+   /// `file->Add("foo", obj2)` will cause `obj1` to be overwritten by `obj2` upon flushing the file.
+   ///
+   /// NOTE: Added objects are written only the first time the file is flushed! If you want to further modify an
+   /// object after flushing you should Add it again (this is normally not an issue as the file is only flushed when
+   /// closing it unless you explicitly call `file->Flush()`).
+   ///
+   /// Throws a RException if an object was already Added with the same `path`.
    template <typename T>
    void Add(std::string_view path, std::shared_ptr<T> obj)
    {
