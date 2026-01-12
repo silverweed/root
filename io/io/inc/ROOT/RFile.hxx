@@ -231,7 +231,7 @@ class RFile final {
       /// When encountering an object at the specified path, overwrite it with the new one instead of erroring out.
       kPutAllowOverwrite = 0x1,
       /// When overwriting an object, preserve the existing one and create a new cycle, rather than removing it.
-      kPutOverwriteKeepCycle = 0x2,
+      kPutKeepCycle = 0x2,
    };
 
    struct RPendingObject {
@@ -341,7 +341,7 @@ public:
    void Overwrite(std::string_view path, const T &obj, bool backupPrevious = true)
    {
       std::uint32_t flags = kPutAllowOverwrite;
-      flags |= backupPrevious * kPutOverwriteKeepCycle;
+      flags |= backupPrevious * kPutKeepCycle;
       PutInternal(path, obj, flags);
    }
 
