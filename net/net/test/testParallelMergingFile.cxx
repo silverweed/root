@@ -72,7 +72,7 @@ static void Server(std::unique_ptr<TServerSocket> ss, const std::string &outFile
          // and it's fine if the client's and server's operations get serialized by the mutexes.
          std::scoped_lock<std::mutex> lock(gMutex);
          auto input = std::make_unique<TMemFile>((std::string("server_") + filename), msg->Buffer() + msg->Length(),
-                                                 length, "READ");
+                                                 length, "READ_WITHOUT_GLOBALREGISTRATION");
 
          msg->SetBufferOffset(msg->Length() + length);
 
