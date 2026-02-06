@@ -33,6 +33,7 @@ namespace ROOT {
 
 namespace Experimental {
 class RNTupleAttrSetWriter;
+class RNTupleAttrSetWriterHandle;
 }
 
 // clang-format off
@@ -84,6 +85,9 @@ private:
    bool fStagedClusterCommitting = false;
    /// Vector of currently staged clusters.
    std::vector<ROOT::Internal::RPageSink::RStagedCluster> fStagedClusters;
+
+   /// All the Attribute Sets created from this FillContext.
+   std::vector<std::shared_ptr<Experimental::RNTupleAttrSetWriter>> fAttributeSets;
 
    template <typename Entry>
    void FillNoFlushImpl(Entry &entry, ROOT::RNTupleFillStatus &status)
