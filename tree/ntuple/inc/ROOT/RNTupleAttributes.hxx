@@ -19,6 +19,7 @@ namespace ROOT {
 
 class RNTupleModel;
 class RNTuple;
+class RNTupleWriter;
 
 namespace Experimental {
 
@@ -157,6 +158,8 @@ attrSet->CommitRange(std::move(range));
 */
 // clang-format on
 class RNTupleAttrSetWriter final {
+   friend class ROOT::RNTupleWriter;
+
    /// Our own fill context.
    RNTupleFillContext fFillContext;
    /// Fill context of the main RNTuple being written (i.e. the RNTuple whose attributes we are).
@@ -217,6 +220,8 @@ by RNTupleWriter::CreateAttributeSet is invalidated as soon as the parent writer
 */
 // clang-format on
 class RNTupleAttrSetWriterHandle final {
+   friend class ROOT::RNTupleWriter;
+
    std::weak_ptr<RNTupleAttrSetWriter> fWriter;
 
    explicit RNTupleAttrSetWriterHandle(const std::shared_ptr<RNTupleAttrSetWriter> &range) : fWriter(range) {}
