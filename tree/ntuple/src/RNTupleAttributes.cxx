@@ -13,6 +13,14 @@
 
 using namespace ROOT::Experimental::Internal::RNTupleAttributes;
 
+static const char *const kRangeStartName = "_rangeStart";
+static const char *const kRangeLenName = "_rangeLen";
+static const char *const kUserModelName = "_userModel";
+
+static constexpr std::size_t kRangeStartIndex = 0;
+static constexpr std::size_t kRangeLenIndex = 1;
+static constexpr std::size_t kUserModelIndex = 2;
+
 static ROOT::RResult<void> ValidateAttributeModel(const ROOT::RNTupleModel &model)
 {
    const auto &projFields = ROOT::Internal::GetProjectedFieldsOfModel(model);
@@ -25,6 +33,28 @@ static ROOT::RResult<void> ValidateAttributeModel(const ROOT::RNTupleModel &mode
                         field.GetQualifiedFieldName() + "'");
    }
    return ROOT::RResult<void>::Success();
+}
+
+//
+//  RNTupleAttrEntryPair
+//
+std::size_t ROOT::Experimental::Internal::RNTupleAttrEntryPair::Append()
+{
+   std::size_t bytesWritten = 0;
+   // Write the meta entry values
+   bytesWritten += fMetaEntry.fValues[kRangeStartIndex].Append();
+   bytesWritten += fMetaEntry.fValues[kRangeLenIndex].Append();
+
+   // Bind the user model's memory to the meta model's subfields
+   const auto &userFields =
+      ROOT::Internal::GetFieldZeroOfModel(fMetaModel).GetMutableSubfields()[kUserModelIndex]->GetMutableSubfields();
+   assert(userFields.size() == fScopedEntry.fValues.size());
+   for (std::size_t i = 0; i < fScopedEntry.fValues.size(); ++i) {
+      std::shared_ptr<void> userPtr = fScopedEntry.fValues[i].GetPtr<void>();
+      auto value = userFields[i]->BindValue(userPtr);
+      bytesWritten += value.Append();
+   }
+   return bytesWritten;
 }
 
 //
@@ -79,4 +109,34 @@ ROOT::Experimental::RNTupleAttrSetWriter::RNTupleAttrSetWriter(const RNTupleFill
      fRangeLenPtr(std::move(rangeLenPtr))
 {
    (void)fMainFillContext;
+}
+
+ROOT::Experimental::RNTupleAttrPendingRange ROOT::Experimental::RNTupleAttrSetWriter::BeginRange()
+{
+   const auto start = fMainFillContext->GetNEntries();
+   return RNTupleAttrPendingRange{start, fFillContext.GetModel().GetModelId()};
+}
+
+void ROOT::Experimental::RNTupleAttrSetWriter::CommitRange(ROOT::Experimental::RNTupleAttrPendingRange pendingRange,
+                                                           REntry &entry)
+{
+   pendingRange.fWasCommitted = true;
+
+   if (pendingRange.GetModelId() != fFillContext.GetModel().GetModelId())
+      throw ROOT::RException(R__FAIL("Range passed to CommitRange() of AttributeSet '" + GetDescriptor().GetName() +
+                                     "' was not created by it or was already committed."));
+
+   // Get current entry number from the writer and use it as end of entry range
+   const auto end = fMainFillContext->GetNEntries();
+   auto &metaEntry = fFillContext.fModel->GetDefaultEntry();
+   R__ASSERT(end >= pendingRange.GetStart());
+   *fRangeStartPtr = pendingRange.GetStart();
+   *fRangeLenPtr = end - pendingRange.GetStart();
+   Internal::RNTupleAttrEntryPair pair{metaEntry, entry, *fFillContext.fModel};
+   fFillContext.FillImpl(pair);
+}
+
+void ROOT::Experimental::RNTupleAttrSetWriter::CommitRange(ROOT::Experimental::RNTupleAttrPendingRange pendingRange)
+{
+   CommitRange(std::move(pendingRange), fUserModel->GetDefaultEntry());
 }
