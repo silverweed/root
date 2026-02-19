@@ -42,7 +42,7 @@ struct FixedStr {
 // NOTE: must be in the same order as ETokType.
 // Strings with the same prefixes must come in order from longest to shortest.
 #define S(x) FixedStr(x)
-static FixedStr kFixeds[] = {
+static const FixedStr kFixeds[] = {
    S("const"),  S("volatile"), S("not"),  S("and"),      S("or"),       S("bitand"), S("bitor"), S("xor"),   S("class"),
    S("struct"), S("union"),    S("enum"), S("typename"), S("unsigned"), S("signed"), S("long"),  S("short"), S("&&"),
    S("||"),     S("&"),        S("|"),    S("^"),        S("~"),        S("++"),     S("--"),    S("->"),    S("+"),
@@ -265,19 +265,21 @@ TToken TLexer::PeekInternal(int flags)
       if (cur > srcSize)
          break;
 
-      // type-parameter
+      // internal parameter
       if (kAcceptExtendedSyntax) {
-         constexpr auto typeParLen = std::char_traits<char>::length("type-parameter-");
-         if (strncmp("type-parameter-", fSrc.data() + fCur, typeParLen) == 0) {
-            auto start = fCur;
-            cur += typeParLen;
-            while (cur < srcSize && (IsDigit(fSrc[cur]) || fSrc[cur] == '-'))
-               ++cur;
-            TToken tok;
-            tok.fType = kTypeParam;
-            tok.fStr = fSrc.substr(start, cur - start);
-            fNext = cur;
-            return tok;
+         static const FixedStr internalParams[] = {FixedStr("type-parameter-"), FixedStr("value-parameter-")};
+         for (auto paramStr = std::begin(internalParams); paramStr != std::end(internalParams); ++paramStr) {
+            if (strncmp(paramStr->fStr, fSrc.data() + fCur, paramStr->fSize) == 0) {
+               auto start = fCur;
+               cur += paramStr->fSize;
+               while (cur < srcSize && (IsDigit(fSrc[cur]) || fSrc[cur] == '-'))
+                  ++cur;
+               TToken tok;
+               tok.fType = kInternalParam;
+               tok.fStr = fSrc.substr(start, cur - start);
+               fNext = cur;
+               return tok;
+            }
          }
       }
 
@@ -407,9 +409,9 @@ TToken TToken::Fixed(std::string_view fixed)
    return tok;
 }
 
-TToken TToken::TypeParam(std::string_view str)
+TToken TToken::InternalParam(std::string_view str)
 {
-   TToken tok = {kTypeParam};
+   TToken tok = {kInternalParam};
    tok.fStr = str;
    return tok;
 }
@@ -945,7 +947,7 @@ static bool ParseTypeName(TLexer &lex, TNodeTree &tree, TNode *type)
    assert(type->fNodeType == TNode::kType);
 
    TToken tok = lex.Peek();
-   if (tok.fType != kIdent && tok.fType != kTypeParam) {
+   if (tok.fType != kIdent && tok.fType != kInternalParam) {
       // type name might be omitted if we found some modifiers (e.g. "short").
       // In that case, transform the modifiers into the actual type name.
       if (!(type->fType.fFlags & TType::kModifiersMask)) {

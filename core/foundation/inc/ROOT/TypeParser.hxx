@@ -80,7 +80,7 @@ enum ETokType {
    kCloseSquare,
    kLastFixed = kCloseSquare,
    // A pseudo-identifier of the form "type-parameter-X-Y" appearing as an internal type in some occasions.
-   kTypeParam,
+   kInternalParam,
    kEOF,
 };
 
@@ -102,7 +102,7 @@ struct TToken {
    static TToken String(std::string_view str);
    static TToken Number(std::string_view str);
    static TToken Fixed(std::string_view str);
-   static TToken TypeParam(std::string_view str);
+   static TToken InternalParam(std::string_view str);
 
    TToken() = default;
    TToken(ETokType type) : fType(type) {}

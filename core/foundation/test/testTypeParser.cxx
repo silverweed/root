@@ -78,11 +78,14 @@ TEST(TypeParser, Lex)
              VT({TToken::Ident("A"), kLt, TToken::Ident("B"), kLt, TToken::Ident("C"), kShiftRight}));
 }
 
-TEST(TypeParser, LexTypeParam)
+TEST(TypeParser, LexInternalParam)
 {
    EXPECT_EQ(TLexer::Tokenize("Foo<bar, type-parameter-0-1, Baz<type-parameter-1-1> >"),
-             VT({TToken::Ident("Foo"), kLt, TToken::Ident("bar"), kComma, TToken::TypeParam("type-parameter-0-1"),
-                 kComma, TToken::Ident("Baz"), kLt, TToken::TypeParam("type-parameter-1-1"), kGt, kGt}));
+             VT({TToken::Ident("Foo"), kLt, TToken::Ident("bar"), kComma, TToken::InternalParam("type-parameter-0-1"),
+                 kComma, TToken::Ident("Baz"), kLt, TToken::InternalParam("type-parameter-1-1"), kGt, kGt}));
+   EXPECT_EQ(TLexer::Tokenize("Foo<bar, value-parameter-0-1, Baz<value-parameter-1-1> >"),
+             VT({TToken::Ident("Foo"), kLt, TToken::Ident("bar"), kComma, TToken::InternalParam("value-parameter-0-1"),
+                 kComma, TToken::Ident("Baz"), kLt, TToken::InternalParam("value-parameter-1-1"), kGt, kGt}));
 }
 
 TEST(TypeParser, LexInvalidTypes)
@@ -437,6 +440,7 @@ TEST(TypeParser, ShortTypeParam)
 {
    EXPECT_EQ(ShortType("T<type-parameter-0-0, C<int, type-parameter-1-1>>").Unwrap(),
              "T<type-parameter-0-0,C<int,type-parameter-1-1>>");
+   EXPECT_EQ(ShortType("::_Storage<_Up,value-parameter-1-1>").Unwrap(), "::_Storage<_Up,value-parameter-1-1>");
 }
 
 TEST(TypeParser, ShortTypeScoped)
