@@ -27,15 +27,20 @@
 #include <string_view>
 #include <algorithm>
 #include <string>
-#include <regex>
 
 #include "TSpinLockGuard.h"
 #include <TError.h>
 
+using std::string, std::string_view, std::vector, std::set;
+
+#define DEBUG_ENABLE_OLD 1
+#define DEBUG_ENABLE_NEW 0
+
+#ifdef DEBUG_ENABLE_NEW
+#include <regex>
 #include <ROOT/TypeParser.hxx>
 #include <ROOT/StringUtils.hxx>
-
-using std::string, std::string_view, std::vector, std::set;
+#endif
 
 namespace {
 static TClassEdit::TInterpreterLookupHelper *gInterpreterHelper = nullptr;
@@ -1358,6 +1363,8 @@ string TClassEdit::CleanType(const char *typeDesc, int mode, const char **tail)
    return result;
 }
 
+#if DEBUG_ENABLE_NEW
+
 // DEBUG
 [[maybe_unused]]
 static std::string StringifyMode(int mode)
@@ -1557,9 +1564,9 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
                node = tree.fRoot;
                // Info("TClassEdit", "node after: %p", node);
             } else {
-               #if 0
+#if 0
                R__ASSERT(false); // TEMP
-               #else
+#else
                resolvedTypeTree.fArena->fPrev = tree.fArena->fLast;
                tree.fArena->fLast = resolvedTypeTree.fArena;
                resolvedTypeTree.fArena = nullptr;
@@ -1575,7 +1582,7 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
                   }
                }
                node = newNode;
-               #endif
+#endif
             }
          }
       } else {
@@ -1729,56 +1736,12 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
       type.fNamespace.erase(0, std::char_traits<char>::length("std::"));
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////////
-/// Return the absolute type of typeDesc.
-/// E.g.: typeDesc = "class const volatile TNamed**", returns "TNamed**".
-/// `mode` is a bitmask of the TClassEdit::EModType enum.
-//////////////////////////////////////////////////////////////////////////////
-
-string TClassEdit::ShortType(const char *typeDesc, int mode)
+static string ShortTypeNew(const char *typeDesc, int mode)
 {
    using namespace ROOT::Internal::TypeParsing;
+   namespace C = TClassEdit;
 
-#define DEBUG_ENABLE_TIMER 0
-#define DEBUG_DUMP_DIFFERENCES 1
-#define DEBUG_DUMP_INPUT 0
-#define DEBUG_ENABLE_OLD 1
-#define DEBUG_ENABLE_NEW 1
 #define DEBUG_DUMP_ERRORS 0
-
-#if DEBUG_DUMP_INPUT
-   Info("ClassEdit_Input", "%s", typeDesc);
-#endif
-
-#if DEBUG_ENABLE_TIMER
-   struct Timer {
-      const char *fName;
-      std::chrono::time_point<std::chrono::high_resolution_clock> fStart;
-      bool fStopped = false;
-      Timer(const char *name) : fName(name), fStart(std::chrono::high_resolution_clock::now()) {}
-      void Stop()
-      {
-         if (fStopped)
-            return;
-         fStopped = true;
-         auto end = std::chrono::high_resolution_clock::now();
-         auto t = std::chrono::duration_cast<std::chrono::microseconds>(end - fStart);
-         Info("ClassEdit_Time", "%s took %ld microseconds", fName, t.count());
-      }
-      ~Timer() { Stop(); }
-   };
-#else
-   struct Timer {
-      Timer(const char *) {}
-      void Stop() {}
-   };
-#endif
-
-   std::string answer;
-
-#if DEBUG_ENABLE_NEW
-   Timer timerNew("new");
 
    auto tree = ParseType(typeDesc);
    if (!tree.fErrors.empty()) {
@@ -1817,16 +1780,16 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
    }
 
    // Handle modes that only manipulate the outermost node
-   if ((mode & (kDropTrailStar | kInnerClass | kInnedMostClass))) {
+   if ((mode & (C::kDropTrailStar | C::kInnerClass | C::kInnedMostClass))) {
       while (type->fType.fIndirection == TType::EIndirection::kPtr) {
          type = type->fFirstChild;
          assert(type->fNodeType == TNode::kType);
       }
    }
 
-   if (mode & kInnerClass) {
+   if (mode & C::kInnerClass) {
       type = type->fFirstChild;
-   } else if ((mode & kInnedMostClass) && type) {
+   } else if ((mode & C::kInnedMostClass) && type) {
       // NOTE: the original implementation of ShortType() did not care whether the template argument is a type or an
       // expression, so we do the same. This means that "Foo<2, int>" will become "2".
       auto firstChild = type->FirstNonScopedChild();
@@ -1846,27 +1809,88 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
 
    std::stringstream newAns;
    int flags = EPrintFlags::kSpaceAfterClosingTemplate;
-   if (!(mode & kKeepOuterConst))
+   if (!(mode & C::kKeepOuterConst))
       flags |= EPrintFlags::kStripCV;
    if (type)
-      PrintNode(newAns, *type, flags);
+      PrintNode(newAns, *type, flags);  
 
-   answer = newAns.str();
+   return newAns.str();
+}
+
+#endif // DEBUG_ENABLE_NEW
+
+////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+/// Return the absolute type of typeDesc.
+/// E.g.: typeDesc = "class const volatile TNamed**", returns "TNamed**".
+/// `mode` is a bitmask of the TClassEdit::EModType enum.
+//////////////////////////////////////////////////////////////////////////////
+
+string TClassEdit::ShortType(const char *typeDesc, int mode)
+{
+#define DEBUG_ENABLE_TIMER 0
+#define DEBUG_DUMP_DIFFERENCES 0
+#define DEBUG_DUMP_INPUT 0
+
+#if DEBUG_DUMP_INPUT
+   Info("ClassEdit_Input", "%s", typeDesc);
+#endif
+
+#if DEBUG_ENABLE_TIMER
+   struct Timer {
+      const char *fName;
+      const char *fTypeDesc;
+      std::chrono::time_point<std::chrono::high_resolution_clock> fStart;
+      bool fStopped = false;
+      Timer(const char *name, const char *typeDesc)
+         : fName(name), fTypeDesc(typeDesc), fStart(std::chrono::high_resolution_clock::now())
+      {
+      }
+      void Stop()
+      {
+         if (fStopped)
+            return;
+         fStopped = true;
+         auto end = std::chrono::high_resolution_clock::now();
+         auto t = std::chrono::duration_cast<std::chrono::nanoseconds>(end - fStart);
+         Info("ClassEdit_Time", "%s took %ld nanoseconds for %s", fName, t.count(), fTypeDesc);
+      }
+      ~Timer() { Stop(); }
+   };
+#else
+   struct Timer {
+      Timer(const char *, const char*) {}
+      void Stop() {}
+   };
+#endif
+
+   std::string answer;
+
+   // thread_local int nesting = 0;
+   // if (nesting > 0) Info("ClassEdit_Nesting", "nesting: %d for type %s", nesting, typeDesc);
+   // ++nesting;
+
+#if DEBUG_ENABLE_NEW
+   Timer timerNew("new", typeDesc);
+   answer = ShortTypeNew(typeDesc, mode);
    timerNew.Stop();
 #endif
 
 #if DEBUG_ENABLE_OLD
    string oldAnswer;
    {
-      Timer timerOld("old");
+      Timer timerOld("old", typeDesc);
       // get list of all arguments
       if (typeDesc) {
          TSplitType arglist(typeDesc, (EModType)mode);
          arglist.ShortType(oldAnswer, mode);
       }
+      timerOld.Stop();
    }
    // answer = oldAnswer;
 #endif
+
+   // --nesting;
 
 #if DEBUG_ENABLE_OLD && DEBUG_ENABLE_NEW && DEBUG_DUMP_DIFFERENCES
    // if (strstr(typeDesc, "RDavixFileDes")) {
