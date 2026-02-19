@@ -1551,10 +1551,11 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
             // Graft the resolved type tree into the original node
             if (node == &tree.fNodes[0]) {
                // if this was the top-level node, replace the whole tree.
-               Info("TClassEdit", "Replacing node %s with %s. node before: %p", StringifyNode(*node).c_str(), StringifyNode(*resolvedTypeTree.fRoot).c_str(), node);
+               // Info("TClassEdit", "Replacing node %s with %s. node before: %p", StringifyNode(*node).c_str(),
+               // StringifyNode(*resolvedTypeTree.fRoot).c_str(), node);
                tree = std::move(resolvedTypeTree);
                node = tree.fRoot;
-               Info("TClassEdit", "node after: %p", node);
+               // Info("TClassEdit", "node after: %p", node);
             } else {
                #if 0
                R__ASSERT(false); // TEMP
@@ -1837,11 +1838,9 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
    ForEachNode(type, [mode, &tree, &type](TNode *&cur) {
       auto pTree = cur;
       ShortTypeHandleSingleNode(tree, cur, mode);
-      if (pTree != cur) {
-         Warning("TREE", "cur changed!");
-         if (pTree == type)
-            type = cur;
-      }
+      // If the root of the tree changed, update `type` to point to it.
+      if (pTree != cur && pTree == type)
+         type = cur;
       return true;
    });
 
@@ -1870,13 +1869,13 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
 #endif
 
 #if DEBUG_ENABLE_OLD && DEBUG_ENABLE_NEW && DEBUG_DUMP_DIFFERENCES
-   if (strstr(typeDesc, "RDavixFileDes")) {
-      if (newAns.str() != oldAnswer) {
-         Error("TClassEdit_Diff", "answer != oldAnswer!\n  mode: %s\n  orig: %s\n  new: `%s`\n  old: `%s`",
-               StringifyMode(mode).c_str(), typeDesc, newAns.str().c_str(), oldAnswer.c_str());
-         // R__ASSERT(false);
-      }
+   // if (strstr(typeDesc, "RDavixFileDes")) {
+   if (newAns.str() != oldAnswer) {
+      Error("TClassEdit_Diff", "answer != oldAnswer!\n  mode: %s\n  orig: %s\n  new: `%s`\n  old: `%s`",
+            StringifyMode(mode).c_str(), typeDesc, newAns.str().c_str(), oldAnswer.c_str());
+      // R__ASSERT(false);
    }
+   // }
 #endif
 
    return answer;
