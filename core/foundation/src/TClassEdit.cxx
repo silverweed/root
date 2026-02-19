@@ -1708,7 +1708,7 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
    if ((mode & TClassEdit::kDropStlDefault) && (stlArgKind != kArgNone)) {
       assert(stlAlloc != EAllocKind::kNoAlloc);
 
-      do {
+      while (node->fNumChildren >= 2) {
          bool (*checkFn)(const TNode &, const TNode &);
          if ((stlArgKind == kArgComparator) && node->fNumChildren >= 2) {
             checkFn = IsDefComp;
@@ -1721,7 +1721,7 @@ static void ShortTypeHandleSingleNode(ROOT::Internal::TypeParsing::TNodeTree &tr
             node->DropLastChild();
          else
             break;
-      } while (node->fNumChildren >= 2);
+      }
    }
 
    if ((mode & TClassEdit::kDropStd) && ROOT::StartsWith(type.fNamespace, "std::"))
@@ -1790,6 +1790,8 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
    if (!tree.fRoot)
       return "";
 
+   // tree.PrintTreeDebug();
+
    // kDropTrailStar    = 1<<0, /* remove trailing '*' */
    // kDropDefaultAlloc = 1<<1, /* remove default allocators from STL containers */
    // kDropAlloc        = 1<<2, /* remove all allocators from STL containers */
@@ -1832,11 +1834,14 @@ string TClassEdit::ShortType(const char *typeDesc, int mode)
       }
    }
 
-   ForEachNode(type, [mode, &tree](TNode *&cur) {
-            auto pTree = cur;
+   ForEachNode(type, [mode, &tree, &type](TNode *&cur) {
+      auto pTree = cur;
       ShortTypeHandleSingleNode(tree, cur, mode);
-      if (pTree != cur)
+      if (pTree != cur) {
          Warning("TREE", "cur changed!");
+         if (pTree == type)
+            type = cur;
+      }
       return true;
    });
 
