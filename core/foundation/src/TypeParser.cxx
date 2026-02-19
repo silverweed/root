@@ -1050,6 +1050,7 @@ static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *&type)
    }
    ParseTypeArray(lex, tree, type);
    // NOTE: if we find any indirection, we still need to finish parsing the function pointer, so pop back to it.
+   TNode *const outermostType = type;
    while (type->fType.fIndirection != TType::EIndirection::kFuncPtr)
       type = type->fFirstChild;
 
@@ -1072,6 +1073,8 @@ static bool ParseFunctionPtr(TLexer &lex, TNodeTree &tree, TNode *&type)
       return false;
    }
 
+   // Restore the type to the outermost type, otherwise we will add the inner FuncPtr as the child of the current node.
+   type = outermostType;
    return true;
 }
 
@@ -1280,29 +1283,32 @@ static void PrintTypeNode(std::ostream &out, const TNode &node, int flags)
       }
 
       // If we are the outermost indirection of a function pointer, terminate the type by appending the arguments.
-      const TNode *fnPtr = &node;
-      while (fnPtr &&
-             !(fnPtr->fNodeType == TNode::kType && fnPtr->fType.fIndirection == TType::EIndirection::kFuncPtr)) {
-         fnPtr = fnPtr->FirstNonScopedChild();
-      }
-      if (fnPtr) {
-         assert(!(fnPtr->fFlags & TNode::kScoped));
-
-         // found the function pointer descendant, now check if we're the outermost indirection.
-         bool isOutermost = !node.fParent || node.fParent->fNodeType != TNode::kType;
-         if (!isOutermost) {
-            auto parInd = node.fParent->fType.fIndirection;
-            isOutermost = parInd != TType::EIndirection::kArray && parInd != TType::EIndirection::kRef &&
-                          parInd != TType::EIndirection::kPtr && parInd != TType::EIndirection::kRvRef;
+      if (node.fType.fIndirection != TType::EIndirection::kNone &&
+          node.fType.fIndirection != TType::EIndirection::kFunc) {
+         const TNode *fnPtr = &node;
+         while (fnPtr &&
+                !(fnPtr->fNodeType == TNode::kType && fnPtr->fType.fIndirection == TType::EIndirection::kFuncPtr)) {
+            fnPtr = fnPtr->FirstNonScopedChild();
          }
-         if (isOutermost) {
-            out << ")(";
-            for (TNode *arg = fnPtr->fFirstChild->fNextSibling; arg; arg = arg->fNextSibling) {
-               PrintNode(out, *arg, flags);
-               if (arg->fNextSibling)
-                  out << ",";
+         if (fnPtr) {
+            assert(!(fnPtr->fFlags & TNode::kScoped));
+
+            // found the function pointer descendant, now check if we're the outermost indirection.
+            bool isOutermost = !node.fParent || node.fParent->fNodeType != TNode::kType;
+            if (!isOutermost) {
+               auto parInd = node.fParent->fType.fIndirection;
+               isOutermost = parInd != TType::EIndirection::kArray && parInd != TType::EIndirection::kRef &&
+                             parInd != TType::EIndirection::kPtr && parInd != TType::EIndirection::kRvRef;
             }
-            out << ")";
+            if (isOutermost) {
+               out << ")(";
+               for (TNode *arg = fnPtr->fFirstChild->fNextSibling; arg; arg = arg->fNextSibling) {
+                  PrintNode(out, *arg, flags);
+                  if (arg->fNextSibling)
+                     out << ",";
+               }
+               out << ")";
+            }
          }
       }
 
@@ -1394,7 +1400,10 @@ static void PrintNodeDebug(std::ostream &out, const TNode &node, int indent)
    if (node.fNodeType == TNode::kType) {
       if (node.fType.fIndirection == TType::EIndirection::kNone)
          out << "Type " << node.fType.fNamespace << node.fType.fName;
-      else {
+      else if (node.fType.fIndirection == TType::EIndirection::kFunc) {
+         PrintTo(node.fType.fIndirection, &out);
+         out << " with return type:";
+      } else {
          PrintTo(node.fType.fIndirection, &out);
          out << " to:";
       }
@@ -1406,8 +1415,14 @@ static void PrintNodeDebug(std::ostream &out, const TNode &node, int indent)
    }
    out << "\n";
 
-   for (TNode *child = node.fFirstChild; child; child = child->fNextSibling)
+   for (TNode *child = node.fFirstChild; child; child = child->fNextSibling) {
+      if (child == node.fFirstChild->fNextSibling && node.fType.fIndirection == TType::EIndirection::kFunc) {
+         for (int i = 0; i < indent; ++i)
+            out << ' ';
+         out << " and arguments:\n";
+      }
       PrintNodeDebug(out, *child, indent + 2);
+   }
 }
 
 void TNodeTree::PrintTreeDebug(std::ostream &out) const

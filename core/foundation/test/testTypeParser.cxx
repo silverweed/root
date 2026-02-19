@@ -385,7 +385,10 @@ TEST(TypeParser, ShortType)
    EXPECT_EQ(ShortType("short*").Unwrap(), "short*");
    EXPECT_EQ(ShortType("const volatile class TNamed**").Unwrap(), "TNamed**");
    EXPECT_EQ(ShortType("unsigned long int").Unwrap(), "unsigned long int");
+   EXPECT_EQ(ShortType("T(**)(int, char*)").Unwrap(), "T(**)(int,char*)");
+   EXPECT_EQ(ShortType("Foo<T(**)(int, char*)>").Unwrap(), "Foo<T(**)(int,char*)>");
    EXPECT_EQ(ShortType("T<C, Foo ...>").Unwrap(), "T<C,Foo...>");
+   EXPECT_EQ(ShortType("Bar<Foo<T(**)(int, char*)>(float)>").Unwrap(), "Bar<Foo<T(**)(int,char*)>(float)>");
 
    EXPECT_EQ(
       ShortType("std::pmr::polymorphic_allocator<std::sub_match<__gnu_cxx::__normal_iterator<const "
