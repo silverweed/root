@@ -291,6 +291,67 @@ public:
    }
 };
 
+// clang-format off
+/**
+\class ROOT::Experimental::RNTupleAttrSetReader
+\ingroup NTuple
+\brief Class used to read a RNTupleAttrSet in the context of a RNTupleReader
+
+An RNTupleAttrSetReader is created via RNTupleReader::OpenAttributeSet. Once created, it may outlive its parent Reader.
+Reading Attributes works similarly to reading regular RNTuple entries: you can either create entries or just use the
+AttrSetReader Model's default entry and load data into it via LoadAttrEntry.
+
+~~ {.cpp}
+// Reading Attributes via RNTupleAttrSetReader
+// -------------------------------------------
+
+// Assuming `reader` is a RNTupleReader:
+auto attrSet = reader->OpenAttributeSet("MyAttrSet");
+
+// Just like how you would read a regular RNTuple, first get the pointer to the fields you want to read:
+auto &attrEntry = attrSet->GetModel().GetDefaultEntry();
+auto pAttr = attrEntry->GetPtr<std::string>("myAttr");
+
+// Then select which attributes you want to read. E.g. read all attributes linked to the entry at index 10:
+for (auto idx : attrSet->GetAttributes(10)) {
+   attrSet->LoadAttrEntry(idx);
+   cout << "entry " << idx << " has attribute " << *pAttr << "\n";
+}
+~~
+*/
+// clang-format on
+class RNTupleAttrSetReader final {
+   friend class ROOT::RNTupleReader;
+
+   /// List containing pairs { entryRange, entryIndex }, used to quickly find out which entries in the Attribute
+   /// RNTuple contain entries that overlap a given range. The list is sorted by range start, i.e.
+   /// entryRange.first.Start().
+   std::vector<std::pair<RNTupleAttrRange, NTupleSize_t>> fEntryRanges;
+   /// The internal Reader used to read the AttributeSet RNTuple
+   std::unique_ptr<RNTupleReader> fReader;
+   /// The reconstructed user model
+   std::unique_ptr<ROOT::RNTupleModel> fUserModel;
+
+   explicit RNTupleAttrSetReader(std::unique_ptr<RNTupleReader> reader);
+
+public:
+   RNTupleAttrSetReader(const RNTupleAttrSetReader &) = delete;
+   RNTupleAttrSetReader &operator=(const RNTupleAttrSetReader &) = delete;
+   RNTupleAttrSetReader(RNTupleAttrSetReader &&) = default;
+   RNTupleAttrSetReader &operator=(RNTupleAttrSetReader &&) = default;
+   ~RNTupleAttrSetReader() = default;
+
+   const ROOT::RNTupleDescriptor &GetDescriptor() const;
+   const ROOT::RNTupleModel &GetModel() const { return *fUserModel; }
+
+   std::unique_ptr<REntry> CreateAttrEntry() { return fUserModel->CreateEntry(); }
+   RNTupleAttrRange LoadAttrEntry(NTupleSize_t index);
+   RNTupleAttrRange LoadAttrEntry(NTupleSize_t index, REntry &entry);
+
+   /// Returns the number of all attribute entries in this Attribute Set.
+   std::size_t GetNAttrEntries() const { return fEntryRanges.size(); }
+};
+
 } // namespace Experimental
 } // namespace ROOT
 
