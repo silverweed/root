@@ -12,6 +12,7 @@ If you have never used ROOT before and don’t know where to start, we recommend
 - @ref tutorial_ntuple
 - @ref tutorial_dataframe
 - @ref tutorial_roofit
+- @ref tutorial_rfile
 
 The `$ROOTSYS/tutorials` directory includes several sub-directories:
 
@@ -50,6 +51,10 @@ The `$ROOTSYS/tutorials` directory includes several sub-directories:
 \defgroup tutorial_math Math tutorials
 \ingroup Tutorials
 \brief Examples showing the Math classes.
+
+\defgroup tutorial_rfile
+\ingroup Tutorials
+\brief Examples showing RFile, the new experimental interface to ROOT files.
 
 \defgroup tutorial_roofit RooFit packages tutorials
 \ingroup Tutorials
