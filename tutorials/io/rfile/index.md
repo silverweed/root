@@ -9,4 +9,5 @@ It is designed to be a leaner interface that makes every operation explicit (in 
 | **Tutorial** | **Description** |
 |--------------|-----------------|
 | rfile001_basics.C | Basic reading and writing of objects from/into RFile |
+| rfile001_basics.py | Basic reading and writing of objects from/into RFile (Python) |
 
