@@ -851,6 +851,10 @@ public:
    /// Forces the loading of ROOT StreamerInfo from the underlying file. This currently only has an effect for
    /// TFile-backed sources.
    virtual void LoadStreamerInfo() = 0;
+
+   /// Reads an attribute set at the given location and returns a page source for it.
+   virtual std::unique_ptr<ROOT::Internal::RPageSource>
+   ReadAttributeSet(ROOT::RNTupleLocator anchorLocator, std::uint64_t anchorUncompLen);
 }; // class RPageSource
 
 } // namespace Internal

@@ -200,6 +200,9 @@ public:
    LoadClusters(std::span<ROOT::Internal::RCluster::RKey> clusterKeys) final;
 
    void LoadStreamerInfo() final;
+
+   std::unique_ptr<ROOT::Internal::RPageSource>
+   ReadAttributeSet(ROOT::RNTupleLocator anchorLocator, std::uint64_t anchorUncompLen) final;
 }; // class RPageSourceFile
 
 } // namespace Internal

@@ -527,6 +527,8 @@ public:
    /// ~~~
    void EnableMetrics() { fMetrics.Enable(); }
    const Experimental::Detail::RNTupleMetrics &GetMetrics() const { return fMetrics; }
+
+   std::unique_ptr<Experimental::RNTupleAttrSetReader> OpenAttributeSet(std::string_view attrSetName);
 }; // class RNTupleReader
 
 } // namespace ROOT

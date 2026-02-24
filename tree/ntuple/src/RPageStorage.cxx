@@ -1331,3 +1331,9 @@ void ROOT::Internal::RPagePersistentSink::EnableDefaultMetrics(const std::string
       *fMetrics.MakeCounter<RNTupleTickCounter<RNTupleAtomicCounter> *>("timeCpuZip", "ns",
                                                                         "CPU time spent compressing")});
 }
+
+std::unique_ptr<ROOT::Internal::RPageSource>
+ROOT::Internal::RPageSource::ReadAttributeSet(ROOT::RNTupleLocator /*locator*/, std::uint64_t /*uncompLen*/)
+{
+   throw ROOT::RException(R__FAIL("reading attribute sets is not implemented for this Page Source"));
+}

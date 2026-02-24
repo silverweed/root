@@ -746,3 +746,15 @@ void ROOT::Internal::RPageSourceFile::LoadStreamerInfo()
 {
    fReader.LoadStreamerInfo();
 }
+
+std::unique_ptr<ROOT::Internal::RPageSource>
+ROOT::Internal::RPageSourceFile::ReadAttributeSet(ROOT::RNTupleLocator anchorLocator, std::uint64_t anchorUncompLen)
+{
+   assert(anchorLocator.GetType() == RNTupleLocator::kTypeFile);
+
+   const auto anchorPos = anchorLocator.GetPosition<std::uint64_t>();
+   auto attrAnchor =
+      fReader.GetNTupleProperAtOffset(anchorPos, anchorLocator.GetNBytesOnStorage(), anchorUncompLen).Unwrap();
+   auto attrSource = OpenWithDifferentAnchor(attrAnchor);
+   return attrSource;
+}
