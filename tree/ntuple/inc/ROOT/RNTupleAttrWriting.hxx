@@ -50,6 +50,58 @@ struct RNTupleAttrEntryPair {
 
 // clang-format off
 /**
+\class ROOT::Experimental::RNTupleAttrRange
+\ingroup NTuple
+\brief A range of entries linked to an Attribute Entry
+*/
+// clang-format on
+class RNTupleAttrRange final {
+   ROOT::NTupleSize_t fStart = 0;
+   ROOT::NTupleSize_t fLength = 0;
+
+   RNTupleAttrRange(ROOT::NTupleSize_t start, ROOT::NTupleSize_t length) : fStart(start), fLength(length) {}
+
+public:
+   static RNTupleAttrRange FromStartLength(ROOT::NTupleSize_t start, ROOT::NTupleSize_t length)
+   {
+      return RNTupleAttrRange{start, length};
+   }
+
+   /// Creates an AttributeRange from [start, end), where `end` is one past the last valid entry of the range
+   /// (`FromStartEnd(0, 10)` will create a range whose last valid index is 9).
+   static RNTupleAttrRange FromStartEnd(ROOT::NTupleSize_t start, ROOT::NTupleSize_t end)
+   {
+      R__ASSERT(end >= start);
+      return RNTupleAttrRange{start, end - start};
+   }
+
+   RNTupleAttrRange() = default;
+
+   /// Returns the first valid entry index in the range. Returns nullopt if the range has zero length.
+   std::optional<ROOT::NTupleSize_t> GetFirst() const { return fLength ? std::make_optional(fStart) : std::nullopt; }
+   /// Returns the beginning of the range. Note that this is *not* a valid index in the range if the range has zero
+   /// length.
+   ROOT::NTupleSize_t GetStart() const { return fStart; }
+   /// Returns the last valid entry index in the range. Returns nullopt if the range has zero length.
+   std::optional<ROOT::NTupleSize_t> GetLast() const
+   {
+      return fLength ? std::make_optional(fStart + fLength - 1) : std::nullopt;
+   }
+   /// Returns one past the last valid index of the range, equal to `GetStart() + GetLength()`.
+   ROOT::NTupleSize_t GetEnd() const { return fStart + fLength; }
+   ROOT::NTupleSize_t GetLength() const { return fLength; }
+
+   /// Returns the pair { firstEntryIdx, lastEntryIdx } (inclusive). Returns nullopt if the range has zero length.
+   std::optional<std::pair<ROOT::NTupleSize_t, ROOT::NTupleSize_t>> GetFirstLast() const
+   {
+      return fLength ? std::make_optional(std::make_pair(fStart, fStart + fLength - 1)) : std::nullopt;
+   }
+   /// Returns the pair { start, length }.
+   std::pair<ROOT::NTupleSize_t, ROOT::NTupleSize_t> GetStartLength() const { return {GetStart(), GetLength()}; }
+};
+
+// clang-format off
+/**
 \class ROOT::Experimental::RNTupleAttrPendingRange
 \ingroup NTuple
 \brief A not-yet-finalized Attribute Range used for writing
