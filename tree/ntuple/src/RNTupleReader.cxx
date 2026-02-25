@@ -15,7 +15,7 @@
 
 #include <ROOT/RField.hxx>
 #include <ROOT/RFieldVisitor.hxx>
-#include <ROOT/RNTupleAttributes.hxx>
+#include <ROOT/RNTupleAttrReading.hxx>
 #include <ROOT/RNTupleImtTaskScheduler.hxx>
 #include <ROOT/RNTuple.hxx>
 #include <ROOT/RNTupleModel.hxx>

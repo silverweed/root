@@ -1,5 +1,6 @@
 #include "ntuple_test.hxx"
 #include <ROOT/RNTupleAttrWriting.hxx>
+#include <ROOT/RNTupleAttrReading.hxx>
 
 TEST(RNTupleAttributes, CreateWriter)
 {
@@ -63,32 +64,35 @@ TEST(RNTupleAttributes, AttributeSetDuplicateName)
    }
 }
 
-TEST(RNTupleAttributes, BasicWriting)
+TEST(RNTupleAttributes, BasicReadingWriting)
 {
-   FileRaii fileGuard("ntuple_attr_basic_writing.root");
+   FileRaii fileGuard("ntuple_attr_basic_readwriting.root");
 
    ROOT::TestSupport::CheckDiagsRAII diagsRaii;
    diagsRaii.requiredDiag(kWarning, "ROOT.NTuple", "RNTuple Attributes are experimental", false);
 
-   auto model = RNTupleModel::Create();
-   auto pInt = model->MakeField<int>("int");
-   auto writer = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard.GetPath());
+   /// Writing
+   {
+      auto model = RNTupleModel::Create();
+      auto pInt = model->MakeField<int>("int");
+      auto writer = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard.GetPath());
 
-   auto attrModel = RNTupleModel::Create();
-   auto pAttr = attrModel->MakeField<std::string>("attr");
-   auto attrSetWriter = writer->CreateAttributeSet(std::move(attrModel), "AttrSet1");
+      auto attrModel = RNTupleModel::Create();
+      auto pAttr = attrModel->MakeField<std::string>("attr");
+      auto attrSetWriter = writer->CreateAttributeSet(std::move(attrModel), "AttrSet1");
 
-   auto attrRange = attrSetWriter->BeginRange();
-   *pAttr = "My Attribute";
-   for (int i = 0; i < 100; ++i) {
-      *pInt = i;
-      writer->Fill();
+      auto attrRange = attrSetWriter->BeginRange();
+      *pAttr = "My Attribute";
+      for (int i = 0; i < 100; ++i) {
+         *pInt = i;
+         writer->Fill();
+      }
+      attrSetWriter->CommitRange(std::move(attrRange));
+      writer.reset();
+
+      // Cannot create new ranges after closing the main writer
+      EXPECT_THROW((attrRange = attrSetWriter->BeginRange()), ROOT::RException);
    }
-   attrSetWriter->CommitRange(std::move(attrRange));
-   writer.reset();
-
-   // Cannot create new ranges after closing the main writer
-   EXPECT_THROW((attrRange = attrSetWriter->BeginRange()), ROOT::RException);
 
    // Cannot directly fetch the attribute RNTuple from the TFile
    {
@@ -146,6 +150,9 @@ TEST(RNTupleAttributes, BasicWritingWithExplicitEntry)
    for (const auto &attrSetIt : reader->GetDescriptor().GetAttrSetIterable()) {
       EXPECT_EQ(attrSetIt.GetName(), "AttrSet1");
    }
+
+   auto attrSetReader = reader->OpenAttributeSet("AttrSet1");
+   EXPECT_EQ(attrSetReader->GetNAttrEntries(), 1);
 }
 
 TEST(RNTupleAttributes, NoCommitRange)
@@ -184,29 +191,45 @@ TEST(RNTupleAttributes, MultipleSets)
    ROOT::TestSupport::CheckDiagsRAII diagsRaii;
    diagsRaii.requiredDiag(kWarning, "ROOT.NTuple", "RNTuple Attributes are experimental", false);
 
-   auto model = RNTupleModel::Create();
-   auto pInt = model->MakeField<int>("int");
-   auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
-   auto writer = RNTupleWriter::Append(std::move(model), "ntpl", *file);
+   /// Writing
+   {
+      auto model = RNTupleModel::Create();
+      auto pInt = model->MakeField<int>("int");
+      auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
+      auto writer = RNTupleWriter::Append(std::move(model), "ntpl", *file);
 
-   auto attrModel1 = RNTupleModel::Create();
-   auto pInt1 = attrModel1->MakeField<int>("int");
-   auto attrSet1 = writer->CreateAttributeSet(attrModel1->Clone(), "MyAttrSet1");
+      auto attrModel1 = RNTupleModel::Create();
+      auto pInt1 = attrModel1->MakeField<int>("int");
+      auto attrSet1 = writer->CreateAttributeSet(attrModel1->Clone(), "MyAttrSet1");
 
-   auto attrModel2 = RNTupleModel::Create();
-   auto pString2 = attrModel2->MakeField<std::string>("string");
-   auto attrSet2 = writer->CreateAttributeSet(attrModel2->Clone(), "MyAttrSet2");
+      auto attrModel2 = RNTupleModel::Create();
+      auto pString2 = attrModel2->MakeField<std::string>("string");
+      auto attrSet2 = writer->CreateAttributeSet(attrModel2->Clone(), "MyAttrSet2");
 
-   auto attrRange2 = attrSet2->BeginRange();
-   for (int i = 0; i < 100; ++i) {
-      auto attrRange1 = attrSet1->BeginRange();
-      *pInt1 = i;
-      *pInt = i;
-      writer->Fill();
-      attrSet1->CommitRange(std::move(attrRange1));
+      auto attrRange2 = attrSet2->BeginRange();
+      for (int i = 0; i < 100; ++i) {
+         auto attrRange1 = attrSet1->BeginRange();
+         *pInt1 = i;
+         *pInt = i;
+         writer->Fill();
+         attrSet1->CommitRange(std::move(attrRange1));
+      }
+      *pString2 = "Run 1";
+      attrSet2->CommitRange(std::move(attrRange2));
    }
-   *pString2 = "Run 1";
-   attrSet2->CommitRange(std::move(attrRange2));
+
+   /// Reading
+   auto reader = RNTupleReader::Open("ntpl", fileGuard.GetPath());
+   EXPECT_EQ(reader->GetDescriptor().GetNAttributeSets(), 2);
+   auto sets = reader->GetDescriptor().GetAttrSetIterable();
+   // NOTE: there is no guaranteed order in which the attribute sets appear in the iterable
+   EXPECT_NE(std::find_if(sets.begin(), sets.end(), [](auto &&s) { return s.GetName() == "MyAttrSet1"; }), sets.end());
+   EXPECT_NE(std::find_if(sets.begin(), sets.end(), [](auto &&s) { return s.GetName() == "MyAttrSet2"; }), sets.end());
+
+   auto attrSetReader1 = reader->OpenAttributeSet("MyAttrSet1");
+   EXPECT_EQ(attrSetReader1->GetNAttrEntries(), 100);
+   auto attrSetReader2 = reader->OpenAttributeSet("MyAttrSet2");
+   EXPECT_EQ(attrSetReader2->GetNAttrEntries(), 1);
 }
 
 TEST(RNTupleAttributes, AttributeInvalidModel)
