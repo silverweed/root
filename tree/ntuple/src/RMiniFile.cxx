@@ -1238,8 +1238,9 @@ std::uint64_t ROOT::Internal::RNTupleFileWriter::RImplRFile::ReserveBlobKey(size
 
 ////////////////////////////////////////////////////////////////////////////////
 
-ROOT::Internal::RNTupleFileWriter::RNTupleFileWriter(std::string_view name, std::uint64_t maxKeySize)
-   : fNTupleName(name)
+ROOT::Internal::RNTupleFileWriter::RNTupleFileWriter(std::string_view name, std::uint64_t maxKeySize,
+                                                     bool isAttributesRNTuple)
+   : fIsAttributeNTuple(isAttributesRNTuple), fNTupleName(name)
 {
    fFile.emplace<RImplSimple>();
    fNTupleAnchor.fMaxKeySize = maxKeySize;
@@ -1285,7 +1286,8 @@ ROOT::Internal::RNTupleFileWriter::Recreate(std::string_view ntupleName, std::st
    // RNTupleFileWriter::RImplSimple does its own buffering, turn off additional buffering from C stdio.
    std::setvbuf(fileStream, nullptr, _IONBF, 0);
 
-   auto writer = std::unique_ptr<RNTupleFileWriter>(new RNTupleFileWriter(ntupleName, options.GetMaxKeySize()));
+   auto writer = std::unique_ptr<RNTupleFileWriter>(
+      new RNTupleFileWriter(ntupleName, options.GetMaxKeySize(), /*isAttributesRNTuple=*/false));
    RImplSimple &fileSimple = std::get<RImplSimple>(writer->fFile);
    fileSimple.fDirectIO = options.GetUseDirectIO();
    fileSimple.AllocateBuffers(options.GetWriteBufferSize());
@@ -1307,14 +1309,14 @@ ROOT::Internal::RNTupleFileWriter::Recreate(std::string_view ntupleName, std::st
 
 std::unique_ptr<ROOT::Internal::RNTupleFileWriter>
 ROOT::Internal::RNTupleFileWriter::Append(std::string_view ntupleName, TDirectory &fileOrDirectory,
-                                          std::uint64_t maxKeySize)
+                                          std::uint64_t maxKeySize, bool isAttributesRNTuple)
 {
    TFile *file = fileOrDirectory.GetFile();
    if (!file)
       throw RException(R__FAIL("invalid attempt to add an RNTuple to a directory that is not backed by a file"));
    assert(file->IsBinary());
 
-   auto writer = std::unique_ptr<RNTupleFileWriter>(new RNTupleFileWriter(ntupleName, maxKeySize));
+   auto writer = std::unique_ptr<RNTupleFileWriter>(new RNTupleFileWriter(ntupleName, maxKeySize, isAttributesRNTuple));
    auto &fileProper = writer->fFile.emplace<RImplTFile>();
    fileProper.fDirectory = &fileOrDirectory;
    return writer;
@@ -1324,7 +1326,8 @@ std::unique_ptr<ROOT::Internal::RNTupleFileWriter>
 ROOT::Internal::RNTupleFileWriter::Append(std::string_view ntupleName, ROOT::Experimental::RFile &file,
                                           std::string_view ntupleDir, std::uint64_t maxKeySize)
 {
-   auto writer = std::unique_ptr<RNTupleFileWriter>(new RNTupleFileWriter(ntupleName, maxKeySize));
+   auto writer =
+      std::unique_ptr<RNTupleFileWriter>(new RNTupleFileWriter(ntupleName, maxKeySize, /*isAttributesRNTuple=*/false));
    auto &rfile = writer->fFile.emplace<RImplRFile>();
    rfile.fFile = &file;
    R__ASSERT(ntupleDir.empty() || ntupleDir[ntupleDir.size() - 1] == '/');
@@ -1333,16 +1336,18 @@ ROOT::Internal::RNTupleFileWriter::Append(std::string_view ntupleName, ROOT::Exp
 }
 
 std::unique_ptr<ROOT::Internal::RNTupleFileWriter>
-ROOT::Internal::RNTupleFileWriter::CloneWithDifferentName(std::string_view ntupleName) const
+ROOT::Internal::RNTupleFileWriter::CloneWithDifferentName(std::string_view ntupleName,
+                                                          const ROOT::RNTupleWriteOptions &opts) const
 {
+   const bool isForAttributes = ROOT::Internal::RNTupleWriteOptionsManip::GetIsForAttributes(opts);
    if (auto *tfile = std::get_if<RImplTFile>(&fFile)) {
-      return Append(ntupleName, *tfile->fDirectory, fNTupleAnchor.fMaxKeySize);
+      return Append(ntupleName, *tfile->fDirectory, fNTupleAnchor.fMaxKeySize, isForAttributes);
    } else if (auto *file = std::get_if<RImplSimple>(&fFile)) {
       if (fIsBare)
          throw ROOT::RException(R__FAIL("cloning a bare file is currently unsupported"));
 
-      auto writer =
-         std::unique_ptr<RNTupleFileWriter>(new RNTupleFileWriter(ntupleName, fNTupleAnchor.GetMaxKeySize()));
+      auto writer = std::unique_ptr<RNTupleFileWriter>(
+         new RNTupleFileWriter(ntupleName, fNTupleAnchor.GetMaxKeySize(), isForAttributes));
       auto &clonedFile = std::get<RImplSimple>(writer->fFile);
       clonedFile.fShared = file->fShared;
       clonedFile.fDirectIO = file->fDirectIO;
@@ -1395,6 +1400,12 @@ ROOT::Internal::RNTupleLocatorAndLength ROOT::Internal::RNTupleFileWriter::Commi
       // NOTE: this must happen after FindObject(), otherwise some TFile implementations, such as TBufferMergerFile,
       // may reset the keys list upon write.
       fileProper->fDirectory->GetFile()->Write();
+
+      if (fIsAttributeNTuple) {
+         // Remove the anchor's key from the directory's KeysList to disallow retrieving directly the
+         // attribute RNTuple from the TFile.
+         fileProper->fDirectory->GetListOfKeys()->Remove(key);
+      }
    } else if (auto fileRFile = std::get_if<RImplRFile>(&fFile)) {
       // Same as the case above but handled via RFile
       fileRFile->fFile->Put(fileRFile->fDir + fNTupleName, fNTupleAnchor);

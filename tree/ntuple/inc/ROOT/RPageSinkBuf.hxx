@@ -150,6 +150,7 @@ public:
    void CommitStagedClusters(std::span<RStagedCluster> clusters) final;
    void CommitClusterGroup() final;
    RNTupleLocatorAndLength CommitDatasetImpl() final;
+   void CommitAttributeSet(std::string_view attrSetName, const RNTupleLocatorAndLength &attrAnchorInfo) final;
 
    RPage ReservePage(ColumnHandle_t columnHandle, std::size_t nElements) final;
 

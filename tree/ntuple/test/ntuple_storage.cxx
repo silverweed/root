@@ -54,6 +54,7 @@ protected:
    void CommitStagedClusters(std::span<RStagedCluster>) final {}
    void CommitClusterGroup() final {}
    ROOT::Internal::RNTupleLocatorAndLength CommitDatasetImpl() final { return {}; }
+   void CommitAttributeSet(std::string_view, const ROOT::Internal::RNTupleLocatorAndLength &) final {}
 
    std::unique_ptr<RPageSink> CloneWithDifferentName(std::string_view, const ROOT::RNTupleWriteOptions &) const final
    {

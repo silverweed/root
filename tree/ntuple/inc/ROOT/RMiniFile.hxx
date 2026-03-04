@@ -16,6 +16,7 @@
 
 #include <ROOT/RError.hxx>
 #include <ROOT/RNTuple.hxx>
+#include <ROOT/RNTupleDescriptor.hxx>
 #include <ROOT/RNTupleSerialize.hxx>
 #include <ROOT/RSpan.hxx>
 #include <Compression.h>
@@ -218,6 +219,9 @@ private:
 
    /// A simple file can either be written as TFile container or as NTuple bare file
    bool fIsBare = false;
+   /// True if this RNTupleWriter is writing an attribute RNTuple. Attribute RNTuples are stored as hidden keys inside
+   /// ROOT files.
+   bool fIsAttributeNTuple = false;
    /// The identifier of the RNTuple; A single writer object can only write a single RNTuple but multiple
    /// writers can operate on the same file if (and only if) they use a proper TFile object for writing.
    std::string fNTupleName;
@@ -229,7 +233,7 @@ private:
    /// The RNTuple class description is always present.
    ROOT::Internal::RNTupleSerializer::StreamerInfoMap_t fStreamerInfoMap;
 
-   explicit RNTupleFileWriter(std::string_view name, std::uint64_t maxKeySize);
+   explicit RNTupleFileWriter(std::string_view name, std::uint64_t maxKeySize, bool isAttributesRNTuple);
 
    /// For a TFile container written by a C file stream, write the header and TFile object
    void WriteTFileSkeleton(int defaultCompression);
@@ -259,7 +263,7 @@ public:
                                                       const ROOT::RNTupleWriteOptions &options);
    /// The directory parameter can also be a TFile object (TFile inherits from TDirectory).
    static std::unique_ptr<RNTupleFileWriter>
-   Append(std::string_view ntupleName, TDirectory &fileOrDirectory, std::uint64_t maxKeySize);
+   Append(std::string_view ntupleName, TDirectory &fileOrDirectory, std::uint64_t maxKeySize, bool isAttributesRNTuple);
 
    static std::unique_ptr<RNTupleFileWriter> Append(std::string_view ntupleName, ROOT::Experimental::RFile &file,
                                                     std::string_view dirPath, std::uint64_t maxKeySize);
@@ -274,7 +278,8 @@ public:
    /// RNTuple named `ntupleName`. Onle one of the two writers can safely write to the file at the same time.
    /// This method is currently only supported for TFile-based Writers and will throw an exception if that's not the
    /// case.
-   std::unique_ptr<RNTupleFileWriter> CloneWithDifferentName(std::string_view ntupleName) const;
+   std::unique_ptr<RNTupleFileWriter>
+   CloneWithDifferentName(std::string_view ntupleName, const ROOT::RNTupleWriteOptions &opts) const;
 
    /// Seek a simple writer to offset. Note that previous data is not flushed immediately, but only by the next write
    /// (if necessary).

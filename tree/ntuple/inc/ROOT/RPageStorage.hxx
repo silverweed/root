@@ -390,6 +390,12 @@ public:
    virtual std::unique_ptr<RPageSink>
    CloneWithDifferentName(std::string_view name, const RNTupleWriteOptions &opts) const = 0;
 
+   /// Adds the given anchor information (name + locator) into the main RNTuple's descriptor as an attribute set
+   /// linked to it with the given name.
+   /// The attribute set must have already been written to storage via RNTupleAttrSetWriter::Commit().
+   /// Note that, by RNTuple specs, this is only legal to call on a non-attribute RNTuple's sink.
+   virtual void CommitAttributeSet(std::string_view attrSetName, const RNTupleLocatorAndLength &attrAnchorInfo) = 0;
+
    /// The registered callback is executed at the beginning of CommitDataset();
    void RegisterOnCommitDatasetCallback(Callback_t callback) { fOnDatasetCommitCallbacks.emplace_back(callback); }
    /// Run the registered callbacks and finalize the current cluster and the entrire data set.
@@ -542,6 +548,7 @@ public:
    RStagedCluster StageCluster(ROOT::NTupleSize_t nNewEntries) final;
    void CommitStagedClusters(std::span<RStagedCluster> clusters) final;
    void CommitClusterGroup() final;
+   void CommitAttributeSet(std::string_view attrSetName, const RNTupleLocatorAndLength &attrAnchorInfo) final;
    /// \return The locator and length of the written anchor.
    RNTupleLocatorAndLength CommitDatasetImpl() final;
 }; // class RPagePersistentSink
