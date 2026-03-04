@@ -293,6 +293,11 @@ public:
 
 namespace Internal {
 
+struct RNTupleLocatorAndLength {
+   RNTupleLocator fLocator;
+   std::uint32_t fLength;
+};
+
 /// The in-memory representation of a 32bit or 64bit on-disk index column. Wraps the integer in a
 /// named type so that templates can distinguish between integer data columns and index columns.
 class RColumnIndex {
