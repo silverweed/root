@@ -140,3 +140,10 @@ void ROOT::Experimental::RNTupleAttrSetWriter::CommitRange(ROOT::Experimental::R
 {
    CommitRange(std::move(pendingRange), fUserModel->GetDefaultEntry());
 }
+
+ROOT::Internal::RNTupleLocatorAndLength ROOT::Experimental::RNTupleAttrSetWriter::Commit()
+{
+   fFillContext.FlushCluster();
+   fFillContext.fSink->CommitClusterGroup();
+   return fFillContext.fSink->CommitDataset();
+}

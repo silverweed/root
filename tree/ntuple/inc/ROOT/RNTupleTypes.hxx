@@ -295,6 +295,7 @@ namespace Internal {
 
 struct RNTupleLocatorAndLength {
    RNTupleLocator fLocator;
+   /// Uncompressed length of the anchor, including the checksum.
    std::uint32_t fLength;
 };
 

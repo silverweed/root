@@ -327,3 +327,9 @@ ROOT::Internal::RPageSinkBuf::CloneWithDifferentName(std::string_view name, cons
 {
    return fInnerSink->CloneWithDifferentName(name, opts);
 }
+
+void ROOT::Internal::RPageSinkBuf::CommitAttributeSet(std::string_view attrSetName,
+                                                      const RNTupleLocatorAndLength &attrAnchorInfo)
+{
+   fInnerSink->CommitAttributeSet(attrSetName, attrAnchorInfo);
+}

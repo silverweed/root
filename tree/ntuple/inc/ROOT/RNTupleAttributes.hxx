@@ -205,6 +205,9 @@ public:
 
    /// Creates an REntry fit to pass to CommitRange(RNTupleAttrPendingRange range, REntry entry).
    std::unique_ptr<REntry> CreateEntry() { return fUserModel->CreateEntry(); }
+
+   /// Commits the attributes written so far to disk and disables writing any new ones.
+   ROOT::Internal::RNTupleLocatorAndLength Commit();
 };
 
 // clang-format off
