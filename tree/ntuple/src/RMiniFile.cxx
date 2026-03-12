@@ -1335,8 +1335,16 @@ ROOT::Internal::RNTupleFileWriter::Append(std::string_view ntupleName, ROOT::Exp
 std::unique_ptr<ROOT::Internal::RNTupleFileWriter>
 ROOT::Internal::RNTupleFileWriter::CloneWithDifferentName(std::string_view ntupleName) const
 {
-   if (auto *file = std::get_if<RImplTFile>(&fFile)) {
-      return Append(ntupleName, *file->fDirectory, fNTupleAnchor.fMaxKeySize);
+   if (auto *tfile = std::get_if<RImplTFile>(&fFile)) {
+      return Append(ntupleName, *tfile->fDirectory, fNTupleAnchor.fMaxKeySize);
+   } else if (auto *file = std::get_if<RImplSimple>(&fFile)) {
+      auto writer =
+         std::unique_ptr<RNTupleFileWriter>(new RNTupleFileWriter(ntupleName, fNTupleAnchor.GetMaxKeySize()));
+      auto &clonedFile = std::get<RImplSimple>(writer->fFile);
+      clonedFile.fShared = file->fShared;
+      clonedFile.fDirectIO = file->fDirectIO;
+      clonedFile.fIsClone = true;
+      return writer;
    }
    // TODO: support also non-TFile-based writers
    throw ROOT::RException(R__FAIL("cannot clone a non-TFile-based RNTupleFileWriter."));
@@ -1385,7 +1393,7 @@ void ROOT::Internal::RNTupleFileWriter::Commit(int compression)
    // Writing by C file stream: prepare the container format header and stream the RNTuple anchor object
    auto &fileSimple = std::get<RImplSimple>(fFile);
 
-   if (fIsBare) {
+   if (fIsBare && !fileSimple.fIsClone) {
       RTFNTuple ntupleOnDisk(fNTupleAnchor);
       // Compute the checksum
       std::uint64_t checksum = XXH3_64bits(ntupleOnDisk.GetPtrCkData(), ntupleOnDisk.GetSizeCkData());
@@ -1403,15 +1411,17 @@ void ROOT::Internal::RNTupleFileWriter::Commit(int compression)
    WriteTFileFreeList(); // NOTE: this is written uncompressed
 
    // Update header and TFile record
-   memcpy(fileSimple.fShared->fHeaderBlock, &fileSimple.fShared->fControlBlock->fHeader,
-          fileSimple.fShared->fControlBlock->fHeader.GetSize());
-   R__ASSERT(fileSimple.fShared->fControlBlock->fSeekFileRecord +
-                fileSimple.fShared->fControlBlock->fFileRecord.GetSize() <
-             RImplSimple::kHeaderBlockSize);
-   memcpy(fileSimple.fShared->fHeaderBlock + fileSimple.fShared->fControlBlock->fSeekFileRecord,
-          &fileSimple.fShared->fControlBlock->fFileRecord, fileSimple.fShared->fControlBlock->fFileRecord.GetSize());
+   if (!fileSimple.fIsClone) {
+      memcpy(fileSimple.fShared->fHeaderBlock, &fileSimple.fShared->fControlBlock->fHeader,
+             fileSimple.fShared->fControlBlock->fHeader.GetSize());
+      R__ASSERT(fileSimple.fShared->fControlBlock->fSeekFileRecord +
+                   fileSimple.fShared->fControlBlock->fFileRecord.GetSize() <
+                RImplSimple::kHeaderBlockSize);
+      memcpy(fileSimple.fShared->fHeaderBlock + fileSimple.fShared->fControlBlock->fSeekFileRecord,
+             &fileSimple.fShared->fControlBlock->fFileRecord, fileSimple.fShared->fControlBlock->fFileRecord.GetSize());
 
-   fileSimple.Flush();
+      fileSimple.Flush();
+   }
 }
 
 std::uint64_t ROOT::Internal::RNTupleFileWriter::WriteBlob(const void *data, size_t nbytes, size_t len)
