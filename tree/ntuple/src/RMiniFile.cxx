@@ -1005,9 +1005,6 @@ ROOT::Internal::RNTupleFileWriter::RImplSimple::RSharedData::RSharedData(FILE *f
 
 ROOT::Internal::RNTupleFileWriter::RImplSimple::RSharedData::~RSharedData()
 {
-   if (fFile)
-      fclose(fFile);
-
    std::align_val_t blockAlign{kBlockAlign};
    if (fHeaderBlock)
       ::operator delete[](fHeaderBlock, blockAlign);
