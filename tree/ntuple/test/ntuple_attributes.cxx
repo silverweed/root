@@ -70,10 +70,9 @@ TEST(RNTupleAttributes, BasicWriting)
    ROOT::TestSupport::CheckDiagsRAII diagsRaii;
    diagsRaii.requiredDiag(kWarning, "ROOT.NTuple", "RNTuple Attributes are experimental", false);
 
-   auto file = std::unique_ptr<TFile>(TFile::Open(fileGuard.GetPath().c_str(), "RECREATE"));
    auto model = RNTupleModel::Create();
    auto pInt = model->MakeField<int>("int");
-   auto writer = RNTupleWriter::Append(std::move(model), "ntuple", *file);
+   auto writer = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard.GetPath());
 
    auto attrModel = RNTupleModel::Create();
    auto pAttr = attrModel->MakeField<std::string>("attr");
