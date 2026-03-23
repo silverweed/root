@@ -402,14 +402,20 @@ You will not normally use this directly; see `RNTupleModel::RUpdater` instead.
 */
 // clang-format on
 struct RNTupleModelChangeset {
+   struct RColumnReprChange {
+      ROOT::RFieldBase *fField = nullptr;
+      std::size_t fFirstNewRepr = 0;
+   };
+
    RNTupleModel &fModel;
    /// Points to the fields in fModel that were added as part of an updater transaction
    std::vector<ROOT::RFieldBase *> fAddedFields;
    /// Points to the projected fields in fModel that were added as part of an updater transaction
    std::vector<ROOT::RFieldBase *> fAddedProjectedFields;
+   std::vector<RColumnReprChange> fAddedColumnReprs;
 
    RNTupleModelChangeset(RNTupleModel &model) : fModel(model) {}
-   bool IsEmpty() const { return fAddedFields.empty() && fAddedProjectedFields.empty(); }
+   bool IsEmpty() const { return fAddedFields.empty() && fAddedProjectedFields.empty() && fAddedColumnReprs.empty(); }
 
    // Returns the corresponding record field for parentName. Throws on error.
    // Returns nullptr if parentName is empty (i.e. if the parent is the zero field).
@@ -420,6 +426,9 @@ struct RNTupleModelChangeset {
    /// \see RNTupleModel::AddProjectedField()
    ROOT::RResult<void>
    AddProjectedField(std::unique_ptr<ROOT::RFieldBase> field, RNTupleModel::FieldMappingFunc_t mapping);
+
+   ROOT::RResult<void>
+   AddColumnRepr(const ROOT::RFieldBase *field, const ROOT::RFieldBase::RColumnRepresentations::Selection_t &reprs);
 };
 
 } // namespace Internal

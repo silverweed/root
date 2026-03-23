@@ -82,6 +82,7 @@ class RFieldBase {
    friend class ROOT::Detail::RRawPtrWriteEntry;               // to call Append()
    friend struct ROOT::Internal::RFieldCallbackInjector;       // used for unit tests
    friend struct ROOT::Internal::RFieldRepresentationModifier; // used for unit tests
+   friend struct ROOT::Internal::RNTupleModelChangeset;        // for late model extension of column reprs
    friend void Internal::CallFlushColumnsOnField(RFieldBase &);
    friend void Internal::CallCommitClusterOnField(RFieldBase &);
    friend void Internal::CallConnectPageSinkOnField(RFieldBase &, ROOT::Internal::RPageSink &, ROOT::NTupleSize_t);
@@ -182,6 +183,7 @@ public:
    */
    // clang-format on
    class RColumnRepresentations {
+      friend struct ROOT::Internal::RNTupleModelChangeset;
    public:
       /// A list of column representations
       using Selection_t = std::vector<ColumnRepresentation_t>;

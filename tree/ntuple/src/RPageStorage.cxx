@@ -913,6 +913,29 @@ void ROOT::Internal::RPagePersistentSink::UpdateSchema(const ROOT::Internal::RNT
       for (auto &descendant : *f)
          addProjectedField(descendant);
    }
+   for (auto c : changeset.fAddedColumnReprs) {
+      auto fieldId = descriptor.FindFieldId(c.fField->GetFieldName());
+      auto &fieldDesc = descriptor.GetFieldDescriptor(fieldId);
+      const auto nColumnsPre = fieldDesc.GetLogicalColumnIds().size();
+      ROOT::Internal::CallConnectPageSinkOnField(*c.fField, *this, firstEntry); // issues in turn calls to `AddColumn()`
+      auto columnIterable = descriptor.GetColumnIterable(fieldId);
+      auto columnIt = columnIterable.begin();
+      std::advance(columnIt, nColumnsPre);
+      for (; columnIt != columnIterable.end(); ++columnIt) {
+         const auto &source = *columnIt;
+         auto targetId = descriptor.GetNLogicalColumns();
+         RColumnDescriptorBuilder columnBuilder;
+         columnBuilder.LogicalColumnId(targetId)
+            .PhysicalColumnId(source.GetLogicalId())
+            .FieldId(fieldId)
+            .BitsOnStorage(source.GetBitsOnStorage())
+            .ValueRange(source.GetValueRange())
+            .Type(source.GetType())
+            .Index(source.GetIndex())
+            .RepresentationIndex(source.GetRepresentationIndex());
+         fDescriptorBuilder.AddColumn(columnBuilder.MakeDescriptor().Unwrap());
+      }
+   }
 
    const auto nColumns = descriptor.GetNPhysicalColumns();
    fOpenColumnRanges.reserve(fOpenColumnRanges.size() + (nColumns - nColumnsBeforeUpdate));

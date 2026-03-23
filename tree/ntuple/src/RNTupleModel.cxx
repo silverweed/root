@@ -281,6 +281,32 @@ ROOT::RResult<void> ROOT::Internal::RNTupleModelChangeset::AddProjectedField(std
    return R__FORWARD_RESULT(result);
 }
 
+ROOT::RResult<void> ROOT::Internal::RNTupleModelChangeset::AddColumnRepr(
+   const ROOT::RFieldBase *field, const ROOT::RFieldBase::RColumnRepresentations::Selection_t &newReprs)
+{
+   if (!field->fParent)
+      return R__FAIL("Field given to AddColumnRepr() must have a parent.");
+
+   auto curReprs = field->GetColumnRepresentatives();
+   const auto prevNReprs = curReprs.size();
+   for (auto newRepr : newReprs)
+      if (std::find(curReprs.begin(), curReprs.end(), newRepr) == curReprs.end()) // don't add duplicates
+         curReprs.push_back(newRepr);
+
+   bool found = false;
+   for (auto &child : field->fParent->fSubfields) {
+      if (child.get() == field) {
+         child = field->Clone(field->GetFieldName());
+         child->SetColumnRepresentatives(curReprs);
+         fAddedColumnReprs.push_back(RColumnReprChange{child.get(), prevNReprs});
+         found = true;
+         break;
+      }
+   }
+   R__ASSERT(found);
+   return RResult<void>::Success();
+}
+
 ROOT::RResult<void>
 ROOT::RNTupleModel::RUpdater::AddProjectedField(std::unique_ptr<ROOT::RFieldBase> field, FieldMappingFunc_t mapping)
 {
