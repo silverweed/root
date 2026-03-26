@@ -34,6 +34,10 @@ namespace ROOT {
 namespace Experimental {
 class RNTupleAttrSetWriter;
 }
+namespace Internal {
+// Used for testing
+RPageSink &GetWriterSink(ROOT::RNTupleWriter &writer);
+} // namespace Internal
 
 // clang-format off
 /**
@@ -54,6 +58,7 @@ class RNTupleFillContext {
    friend class ROOT::RNTupleWriter;
    friend class RNTupleParallelWriter;
    friend class ROOT::Experimental::RNTupleAttrSetWriter;
+   friend Internal::RPageSink &Internal::GetWriterSink(RNTupleWriter &);
 
 private:
    /// The page sink's parallel page compression scheduler if IMT is on.

@@ -226,3 +226,8 @@ void ROOT::RNTupleWriter::CloseAttributeSet(ROOT::Experimental::RNTupleAttrSetWr
    // We must have erased the attribute set.
    R__ASSERT(false);
 }
+
+ROOT::Internal::RPageSink &ROOT::Internal::GetWriterSink(ROOT::RNTupleWriter &writer)
+{
+   return *writer.fFillContext.fSink;
+}
