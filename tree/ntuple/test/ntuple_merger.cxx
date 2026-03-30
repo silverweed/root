@@ -1213,12 +1213,15 @@ TEST(RNTupleMerger, DifferentCompatibleRepresentations)
 
       auto sourcePtrs2 = sourcePtrs;
 
+      // TEMP
+      fileGuard3.PreserveFile();
       {
          auto wopts = RNTupleWriteOptions();
          wopts.SetCompression(0);
          auto destination = std::make_unique<RPageSinkFile>("ntuple", fileGuard3.GetPath(), wopts);
          auto opts = RNTupleMergeOptions();
          opts.fCompressionSettings = 0;
+         opts.fMergingMode = ENTupleMergingMode::kUnion; // TEMP to force column extension
          RNTupleMerger merger{std::move(destination)};
          auto res = merger.Merge(sourcePtrs, opts);
          // TODO(gparolini): we want to support this in the future

@@ -1055,6 +1055,28 @@ ROOT::Internal::RPagePersistentSink::InitFromDescriptor(const ROOT::RNTupleDescr
    return model;
 }
 
+// FIXME: this should not be done one repr at a time!
+void ROOT::Internal::RPagePersistentSink::ExtendColumns(const ROOT::RFieldDescriptor &field, std::span<const ENTupleColumnType> newRepresentation)
+{
+   fDescriptorBuilder.ShiftAliasColumns(newRepresentation.size());
+
+   std::uint16_t columnIndex = 0;
+   const auto firstPhysicalIndex = fDescriptorBuilder.GetDescriptor().GetNPhysicalColumns();
+   const auto reprIndex = field.GetLogicalColumnIds().size() / field.GetColumnCardinality();
+   for (auto columnType : newRepresentation) {
+      RColumnDescriptorBuilder columnBuilder;
+      columnBuilder.LogicalColumnId(firstPhysicalIndex + columnIndex)
+         .PhysicalColumnId(firstPhysicalIndex + columnIndex)
+         .FieldId(field.GetId())
+         .BitsOnStorage(source.GetBitsOnStorage())
+         .ValueRange(ROOT::Internal::RColumnElementBase::GetValidBitRange(columnType))
+         .Type(columnType)
+         .Index(columnIndex)
+         .RepresentationIndex(reprIndex);
+      fDescriptorBuilder.AddColumn(columnBuilder.MakeDescriptor().Unwrap());
+   }
+}
+
 void ROOT::Internal::RPagePersistentSink::CommitSuppressedColumn(ColumnHandle_t columnHandle)
 {
    fOpenColumnRanges.at(columnHandle.fPhysicalId).SetIsSuppressed(true);
