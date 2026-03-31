@@ -1176,8 +1176,10 @@ TEST(RNTupleMerger, DifferentCompatibleRepresentations)
    auto model = RNTupleModel::Create();
    auto pFoo = model->MakeField<double>("foo");
    auto clonedModel = model->Clone();
+   auto opts = RNTupleWriteOptions();
+   opts.SetCompression(0);
    {
-      auto ntuple = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard1.GetPath());
+      auto ntuple = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard1.GetPath(), opts);
       for (size_t i = 0; i < 10; ++i) {
          *pFoo = i * 123;
          ntuple->Fill();
@@ -1189,12 +1191,12 @@ TEST(RNTupleMerger, DifferentCompatibleRepresentations)
    {
       auto &fieldFooDbl = clonedModel->GetMutableField("foo");
       fieldFooDbl.SetColumnRepresentatives({{ROOT::ENTupleColumnType::kReal32}});
-      auto ntuple = RNTupleWriter::Recreate(std::move(clonedModel), "ntuple", fileGuard2.GetPath());
+      auto ntuple = RNTupleWriter::Recreate(std::move(clonedModel), "ntuple", fileGuard2.GetPath(), opts);
       auto e = ntuple->CreateEntry();
       auto pFoo2 = e->GetPtr<double>("foo");
       for (size_t i = 0; i < 10; ++i) {
          *pFoo2 = i * 567;
-         ntuple->Fill();
+         ntuple->Fill(*e);
       }
    }
 
@@ -1225,22 +1227,24 @@ TEST(RNTupleMerger, DifferentCompatibleRepresentations)
          RNTupleMerger merger{std::move(destination)};
          auto res = merger.Merge(sourcePtrs, opts);
          // TODO(gparolini): we want to support this in the future
-         EXPECT_FALSE(bool(res));
-         if (res.GetError()) {
-            EXPECT_THAT(res.GetError()->GetReport(), testing::HasSubstr("different column type"));
-         }
-         // EXPECT_TRUE(bool(res));
+         // EXPECT_FALSE(bool(res));
+         // if (res.GetError()) {
+         //    EXPECT_THAT(res.GetError()->GetReport(), testing::HasSubstr("different column type"));
+         // }
+         EXPECT_TRUE(bool(res));
       }
+      // TEMP
+      fileGuard4.PreserveFile();
       {
          auto destination = std::make_unique<RPageSinkFile>("ntuple", fileGuard4.GetPath(), RNTupleWriteOptions());
          RNTupleMerger merger{std::move(destination)};
          auto res = merger.Merge(sourcePtrs);
          // TODO(gparolini): we want to support this in the future
-         EXPECT_FALSE(bool(res));
-         if (res.GetError()) {
-            EXPECT_THAT(res.GetError()->GetReport(), testing::HasSubstr("different column type"));
-         }
-         // EXPECT_TRUE(bool(res));
+         // EXPECT_FALSE(bool(res));
+         // if (res.GetError()) {
+         //    EXPECT_THAT(res.GetError()->GetReport(), testing::HasSubstr("different column type"));
+         // }
+         EXPECT_TRUE(bool(res));
       }
    }
 }
@@ -2537,7 +2541,8 @@ TEST(RNTupleMerger, MergeDeferredAdvanced)
       auto model1 = RNTupleModel::Create();
       auto wopts = RNTupleWriteOptions();
       wopts.SetCompression(0);
-      auto writer1 = RNTupleWriter::Recreate(std::move(model1), "ntuple", fileGuard1.GetPath(), wopts);
+      auto tfile = TFile::Open((fileGuard1.GetPath() + "?reproducible").c_str(), "RECREATE");
+      auto writer1 = RNTupleWriter::Append(std::move(model1), "ntuple", *tfile, wopts);
       auto updater = writer1->CreateModelUpdater();
       updater->BeginUpdate();
       updater->AddField(RFieldBase::Create("flt", "float").Unwrap());
@@ -2610,13 +2615,18 @@ TEST(RNTupleMerger, MergeDeferredAdvanced)
 
    auto pInt = reader->GetModel().GetDefaultEntry().GetPtr<int>("int");
    auto pFlt = reader->GetModel().GetDefaultEntry().GetPtr<float>("flt");
-   for (auto i = 0u; i < reader->GetNEntries(); ++i) {
+   for (auto i : reader->GetEntryRange()) {
       reader->LoadEntry(i);
       float expectedFlt = (i >= 10 && i < 15) ? 0 : i;
       EXPECT_FLOAT_EQ(*pFlt, expectedFlt);
       int expectedInt = (i >= 10 && i < 20) * i;
       EXPECT_EQ(*pInt, expectedInt);
    }
+
+   // TEMP
+   fileGuard1.PreserveFile();
+   fileGuard2.PreserveFile();
+   fileGuardOut.PreserveFile();
 }
 
 TEST(RNTupleMerger, MergeIncrementalLMExt)

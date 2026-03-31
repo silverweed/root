@@ -961,8 +961,18 @@ ROOT::Internal::RClusterDescriptorBuilder::AddExtendedColumnRanges(const RNTuple
                // `ROOT::RFieldBase::EntryToColumnElementIndex()`, i.e. it is a principal column reachable from the
                // field zero excluding subfields of collection and variant fields.
                if (c.IsDeferredColumn()) {
-                  columnRange.SetFirstElementIndex(fCluster.GetFirstEntryIndex() * nRepetitions);
-                  columnRange.SetNElements(fCluster.GetNEntries() * nRepetitions);
+                  if (c.GetRepresentationIndex() == 0) {
+                     columnRange.SetFirstElementIndex(fCluster.GetFirstEntryIndex() * nRepetitions);
+                     columnRange.SetNElements(fCluster.GetNEntries() * nRepetitions);
+                  } else {
+                     const auto &firstReprColumnRange = fCluster.fColumnRanges[c.GetIndex()];
+                     const auto prevFirstElemIndex = fCluster.GetFirstEntryIndex() * nRepetitions;
+                     const auto prevNElems = fCluster.GetNEntries() * nRepetitions;
+                     R__ASSERT(prevFirstElemIndex == firstReprColumnRange.GetFirstElementIndex() * nRepetitions);
+                     R__ASSERT(prevNElems == firstReprColumnRange.GetNElements() * nRepetitions);
+                     columnRange.SetFirstElementIndex(firstReprColumnRange.GetFirstElementIndex() * nRepetitions);
+                     columnRange.SetNElements(firstReprColumnRange.GetNElements() * nRepetitions);
+                  }
                   if (!columnRange.IsSuppressed()) {
                      auto &pageRange = fCluster.fPageRanges[physicalId];
                      pageRange.fPhysicalColumnId = physicalId;

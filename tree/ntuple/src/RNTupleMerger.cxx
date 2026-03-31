@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <deque>
 #include <initializer_list>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -270,12 +271,11 @@ try {
 }
 
 namespace {
-// Functor used to change the compression of a page to `options.fCompressionSettings`.
+// Functor used to change the compression of a page to `fCompressionSettings`.
 struct RChangeCompressionFunc {
    const RColumnElementBase &fSrcColElement;
-   const RColumnElementBase &fDstColElement;
-   const RNTupleMergeOptions &fMergeOptions;
-
+   // const RColumnElementBase &fDstColElement;
+   std::uint32_t fCompressionSettings;
    RPageStorage::RSealedPage &fSealedPage;
    ROOT::Internal::RPageAllocator &fPageAlloc;
    std::uint8_t *fBuffer;
@@ -284,7 +284,7 @@ struct RChangeCompressionFunc {
 
    void operator()() const
    {
-      assert(fSrcColElement.GetIdentifier() == fDstColElement.GetIdentifier());
+      // assert(fSrcColElement.GetIdentifier() == fDstColElement.GetIdentifier());
 
       fSealedPage.VerifyChecksumIfEnabled().ThrowOnError();
 
@@ -297,7 +297,7 @@ struct RChangeCompressionFunc {
       const auto checksumSize = fWriteOpts.GetEnablePageChecksums() * sizeof(std::uint64_t);
       assert(fBufSize >= bytesPacked + checksumSize);
       auto nBytesZipped = ROOT::Internal::RNTupleCompressor::Zip(unzipBuf.get(), bytesPacked,
-                                                                 fMergeOptions.fCompressionSettings.value(), fBuffer);
+                                                                 fCompressionSettings, fBuffer);
 
       fSealedPage = {fBuffer, nBytesZipped + checksumSize, fSealedPage.GetNElements(), fSealedPage.GetHasChecksum()};
       fSealedPage.ChecksumIfEnabled();
@@ -359,6 +359,17 @@ struct RColReprExtension : RColReprMapping {
    ROOT::RFieldBase::ColumnRepresentation_t fSourceRepr;
 };
 
+using ColumnReprMap_t = std::unordered_map<const ROOT::RFieldDescriptor *, std::vector<RColReprMapping>>;
+
+static std::optional<std::uint32_t>
+FindColumnReprMapping(const std::vector<RColReprMapping> &mappings, std::uint32_t sourceReprIndex)
+{
+   for (const auto [src, dst] : mappings)
+      if (src == sourceReprIndex)
+         return dst;
+   return std::nullopt;
+}
+
 struct RDescriptorsComparison {
    std::vector<const ROOT::RFieldDescriptor *> fExtraDstFields;
    std::vector<const ROOT::RFieldDescriptor *> fExtraSrcFields;
@@ -366,16 +377,41 @@ struct RDescriptorsComparison {
    // For each field that has more than 1 column representation in the output model,
    // maps the column representatives of the source field with those of the destination.
    // The key is the destination field.
-   std::unordered_map<const ROOT::RFieldDescriptor *, std::vector<RColReprMapping>> fColReprMappings;
+   ColumnReprMap_t fColReprMappings;
    std::unordered_map<const ROOT::RFieldDescriptor *, std::vector<RColReprExtension>> fColReprExtensions;
 };
 
 struct RColumnOutInfo {
-   ROOT::DescriptorId_t fColumnId;
+   ROOT::DescriptorId_t fColumnId = ROOT::kInvalidDescriptorId;
+   // XXX: probably remove me
+   std::uint16_t fReprIndex = 0;
+   // XXX: still needed?
    ENTupleColumnType fColumnType;
 };
 
-// { fully.qualified.fieldName.colInputId => colOutputInfo }
+// struct RColumnIdMapKey {
+//    std::string fFieldFQName;
+//    ROOT::DescriptorId_t fInputId = ROOT::kInvalidDescriptorId;
+//    std::uint16_t fOutReprIndex = 0;
+
+//    RColumnIdMapKey(const std::string &fieldName, ROOT::DescriptorId_t colId, std::uint16_t reprIndex)
+//       : fFieldFQName(fieldName), fInputId(colId), fOutReprIndex(reprIndex)
+//    {
+//    }
+
+//    bool operator<(const RColumnIdMapKey &other) const
+//    {
+//       if (fFieldFQName < other.fFieldFQName)
+//          return true;
+//       if (fInputId < other.fInputId)
+//          return true;
+//       return fOutReprIndex < other.fOutReprIndex;
+//    }
+// };
+
+// XXX: currently using map for ease of implementation, consider using unordered_map
+// using ColumnIdMap_t = std::map<RColumnIdMapKey, RColumnOutInfo>;
+// { ".fully.qualified.fieldName.colInputIndex.colOutputReprIndex" => colOutputInfo }
 using ColumnIdMap_t = std::unordered_map<std::string, RColumnOutInfo>;
 
 struct RColumnInfoGroup {
@@ -392,16 +428,18 @@ struct RColumnMergeInfo {
    // This column name is built as a dot-separated concatenation of the ancestry of
    // the columns' parent fields' names plus the index of the column itself.
    // e.g. "Muon.pt.x._0"
+   // XXX: remove me!
    std::string fColumnName;
    // The column id in the source RNTuple
-   ROOT::DescriptorId_t fInputId;
+   ROOT::DescriptorId_t fInputId = kInvalidDescriptorId;
    // The corresponding column id in the destination RNTuple (the mapping happens in AddColumnsFromField())
-   ROOT::DescriptorId_t fOutputId;
-   ENTupleColumnType fColumnType;
+   ROOT::DescriptorId_t fOutputId = kInvalidDescriptorId;
+   ENTupleColumnType fColumnType = ENTupleColumnType::kUnknown;
+   std::uint16_t fOutputReprIndex = 0;
    // If nullopt, use the default in-memory type
    std::optional<std::type_index> fInMemoryType;
-   const ROOT::RFieldDescriptor *fParentFieldDescriptor;
-   const ROOT::RNTupleDescriptor *fParentNTupleDescriptor;
+   const ROOT::RFieldDescriptor *fParentFieldDescriptor = nullptr;
+   const ROOT::RNTupleDescriptor *fParentNTupleDescriptor = nullptr;
 };
 
 // Data related to a single call of RNTupleMerger::Merge()
@@ -413,6 +451,7 @@ struct RNTupleMergeData {
    const ROOT::RNTupleDescriptor *fSrcDescriptor = nullptr;
 
    std::vector<RColumnMergeInfo> fColumns;
+   // Maps input column IDs to output IDs
    ColumnIdMap_t fColumnIdMap;
 
    ROOT::NTupleSize_t fNumDstEntries = 0;
@@ -694,8 +733,9 @@ CompareDescriptorStructure(const ROOT::RNTupleDescriptor &dst, const ROOT::RNTup
                      const auto &srcCol = src.GetColumnDescriptor(srcColId);
                      newRepr.push_back(srcCol.GetType());
                   }
-                  res.fColReprExtensions[field.fDst].push_back(
-                     RColReprExtension{{srcReprIdx, static_cast<std::uint32_t>(dstNColReprs)}, newRepr});
+                  RColReprExtension extension{{srcReprIdx, static_cast<std::uint32_t>(dstNColReprs)}, newRepr};
+                  res.fColReprExtensions[field.fDst].push_back(extension);
+                  res.fColReprMappings[field.fDst].push_back(extension);
                }
             }
          }
@@ -798,6 +838,9 @@ ExtendDestinationModel(RDescriptorsComparison &descCmp, ROOT::RNTupleModel &dstM
    // }
    dstModel.Freeze();
    try {
+      // XXX: here we are connecting the new fields/columns to the sink!
+      // We should avoid doing that, as all other fields never get connected.
+      // XXX: note that this calls AutoAdjustColumnTypes and may change the splitness of the columns!
       mergeData.fDestination.UpdateSchema(changeset, mergeData.fNumDstEntries);
    } catch (const ROOT::RException &ex) {
       return R__FAIL(ex.GetError().GetReport());
@@ -913,9 +956,11 @@ RNTupleMerger::MergeCommonColumns(ROOT::Internal::RClusterPool &clusterPool,
 
    const RCluster *cluster = clusterPool.GetCluster(clusterDesc.GetId(), commonColumnSet);
    // we expect the cluster pool to contain the requested set of columns, since they were
-   // validated by CompareDescriptorStructure().
+   // validated by CompareDescriptorStructure() and MergeSourceClusters().
    assert(cluster);
 
+   const std::uint32_t outCompression = mergeData.fMergeOpts.fCompressionSettings.value();
+   
    for (size_t colIdx = 0; colIdx < nCommonColumnsInCluster; ++colIdx) {
       const auto &column = commonColumns[colIdx];
       const auto &columnId = column.fInputId;
@@ -925,9 +970,10 @@ RNTupleMerger::MergeCommonColumns(ROOT::Internal::RClusterPool &clusterPool,
       const auto srcColElement = column.fInMemoryType
                                     ? ROOT::Internal::GenerateColumnElement(*column.fInMemoryType, columnDesc.GetType())
                                     : RColumnElementBase::Generate(columnDesc.GetType());
-      const auto dstColElement = column.fInMemoryType
-                                    ? ROOT::Internal::GenerateColumnElement(*column.fInMemoryType, column.fColumnType)
-                                    : RColumnElementBase::Generate(column.fColumnType);
+      // const auto dstColElement = column.fInMemoryType
+      //                               ? ROOT::Internal::GenerateColumnElement(*column.fInMemoryType,
+      //                               column.fColumnType) : RColumnElementBase::Generate(column.fColumnType);
+      // assert(srcColElement->GetIdentifier() == dstColElement->GetIdentifier());
 
       // Now get the pages for this column in this cluster
       const auto &pages = clusterDesc.GetPageRange(columnId);
@@ -945,22 +991,24 @@ RNTupleMerger::MergeCommonColumns(ROOT::Internal::RClusterPool &clusterPool,
       // L3: on-disk encoding doesn't match: we need to reseal the page, which implies decompressing and
       // recompressing
       //     it.
-      const bool compressionIsDifferent =
-         colRangeCompressionSettings != mergeData.fMergeOpts.fCompressionSettings.value();
-      const bool needsResealing =
-         srcColElement->GetIdentifier().fOnDiskType != dstColElement->GetIdentifier().fOnDiskType;
+      const bool compressionIsDifferent = colRangeCompressionSettings != outCompression;
+      // XXX: in theory we now never need resealing as we always extend the column representations.
+      // TODO: handle split/unsplit autoadjusting based on compression.
+      const bool needsResealing = false;
+      // srcColElement->GetIdentifier().fOnDiskType != dstColElement->GetIdentifier().fOnDiskType;
       const bool needsRecompressing = compressionIsDifferent || needsResealing;
 
       if (needsRecompressing && mergeData.fMergeOpts.fExtraVerbose) {
-         R__LOG_INFO(NTupleMergeLog())
-            << (needsResealing ? "Resealing" : "Recompressing") << " column " << column.fColumnName
-            << ": { compression: " << colRangeCompressionSettings << " => "
-            << mergeData.fMergeOpts.fCompressionSettings.value()
-            << ", onDiskType: " << RColumnElementBase::GetColumnTypeName(srcColElement->GetIdentifier().fOnDiskType)
-            << " => " << RColumnElementBase::GetColumnTypeName(dstColElement->GetIdentifier().fOnDiskType);
+         R__LOG_INFO(NTupleMergeLog()) << (needsResealing ? "Resealing" : "Recompressing") << " column "
+                                       << column.fColumnName << ": { compression: " << colRangeCompressionSettings
+                                       << " => " << mergeData.fMergeOpts.fCompressionSettings.value()
+                                       << ", onDiskType: "
+                                       << RColumnElementBase::GetColumnTypeName(
+                                             srcColElement->GetIdentifier().fOnDiskType);
+         // << " => " << RColumnElementBase::GetColumnTypeName(dstColElement->GetIdentifier().fOnDiskType);
       }
 
-      size_t pageBufferBaseIdx = sealedPageData.fBuffers.size();
+      const size_t pageBufferBaseIdx = sealedPageData.fBuffers.size();
       // If the column range already has the right compression we don't need to allocate any new buffer, so we don't
       // bother reserving memory for them.
       if (needsRecompressing)
@@ -1010,21 +1058,22 @@ RNTupleMerger::MergeCommonColumns(ROOT::Internal::RClusterPool &clusterPool,
 
             // clang-format off
             if (needsResealing) {
-               RTaskVisitor{fTaskGroup}(RResealFunc{
-                  *srcColElement,
-                  *dstColElement,
-                  mergeData.fMergeOpts,
-                  sealedPage,
-                  *fPageAlloc,
-                  buffer.get(),
-                  bufSize,
-                  mergeData.fDestination.GetWriteOptions()
-               });
+               assert(false); // XXX
+               // RTaskVisitor{fTaskGroup}(RResealFunc{
+               //    *srcColElement,
+               //    *dstColElement,
+               //    mergeData.fMergeOpts,
+               //    sealedPage,
+               //    *fPageAlloc,
+               //    buffer.get(),
+               //    bufSize,
+               //    mergeData.fDestination.GetWriteOptions()
+               // });
             } else {
                RTaskVisitor{fTaskGroup}(RChangeCompressionFunc{
                   *srcColElement,
-                  *dstColElement,
-                  mergeData.fMergeOpts,
+                  // *dstColElement,
+                  outCompression,
                   sealedPage,
                   *fPageAlloc,
                   buffer.get(),
@@ -1072,28 +1121,69 @@ RNTupleMerger::MergeSourceClusters(RPageSource &source, std::span<const RColumnM
       const auto nClusterEntries = clusterDesc.GetNEntries();
       R__ASSERT(nClusterEntries > 0);
 
+      // Deduce which columns are suppressed (cluster by cluster) by exclusion, as:
+      // (columns in the columnIdMap) - (columns in commonColumns which are not suppressed).
+      // Note that some suppressed columns may not be in commonColumns because they might not appear at all in the
+      // current source.
+      // std::map<RColumnIdMapKey, ROOT::DescriptorId_t> suppressedColumns;
+      std::unordered_map<const ROOT::RFieldDescriptor *, std::vector<ROOT::DescriptorId_t>> activeColumns;
+
       // NOTE: just because a column is in `commonColumns` it doesn't mean that each cluster in the source contains
       // it, as it may be a deferred column that only has real data in a future cluster. We need to figure out which
       // columns are actually present in this cluster so we only merge their pages (the missing columns are handled
       // by synthesizing zero pages - see below).
-      size_t nCommonColumnsInCluster = commonColumns.size();
-      while (nCommonColumnsInCluster > 0) {
-         // Since `commonColumns` is sorted by column input id, we can simply traverse it from the back and stop as
-         // soon as we find a common column that appears in this cluster: we know that in that case all previous
-         // columns must appear as well.
-         if (clusterDesc.ContainsColumn(commonColumns[nCommonColumnsInCluster - 1].fInputId))
-            break;
-         --nCommonColumnsInCluster;
-      }
-
+      size_t nCommonColumnsInCluster = 0;
       // Convert columns to a ColumnSet for the ClusterPool query
       RCluster::ColumnSet_t commonColumnSet;
       commonColumnSet.reserve(nCommonColumnsInCluster);
-      for (size_t i = 0; i < nCommonColumnsInCluster; ++i)
-         commonColumnSet.emplace(commonColumns[i].fInputId);
+      for (size_t i = 0, len = commonColumns.size(); i < len; ++i) {
+         const auto &column = commonColumns[i];
+
+         // XXX: I think this assumption is now broken, due to column repr remapping
+         // Since `commonColumns` is sorted by column input id, as soon as we find a missing column we know that all
+         // subsequent columns are also absent from the cluster.
+         // if (!colRange) {
+         //    break;
+         // }
+
+         const auto &colRange = clusterDesc.GetColumnRange(column.fInputId);
+         if (!colRange.IsSuppressed()) {
+            ++nCommonColumnsInCluster;
+            commonColumnSet.emplace(column.fInputId);
+            activeColumns[column.fParentFieldDescriptor].push_back(column.fOutputId);
+         }
+      }
+
+      // Commit all suppressed columns.
+      // This is a fairly involved operation, as we need to commit all known columns that:
+      // a) do not appear in extraDstColumns (those are "missing", not suppressed), and
+      // b) do not appear in commonColumnSet (those are the active columns).
+      // Not that these may or may not appear in commonColumns as suppressed columns, since they may or may not be
+      // present in the current source.
+      // The only way to find all the columns is to go and get them from fColumnIdMap, which keeps track of every
+      // column we added to the destination so far. However, since it also contains the extraDstColumns, we need to
+      // specifically only query those columns that belong to a field that has at least 1 column in commonColumns
+      // (remember that commonColumns contains all columns associated to the common fields for this source).
+      for (const auto &[fieldDesc, activeIds] : activeColumns) {
+         const auto &fieldFQName = mergeData.fSrcDescriptor->GetQualifiedFieldName(fieldDesc->GetId());
+         const auto cardinality = fieldDesc->GetColumnCardinality();
+         for (auto i = 0u; i < fieldDesc->GetLogicalColumnIds().size(); ++i) {
+            const auto colIndex = i % cardinality;
+            const auto reprIndex = i / cardinality;
+            const auto colName = "." + fieldFQName + '.' + std::to_string(colIndex) + '.' + std::to_string(reprIndex);
+            const auto colIt = mergeData.fColumnIdMap.find(colName);
+            assert(colIt != mergeData.fColumnIdMap.end());
+            assert(colIt->second.fReprIndex == reprIndex);
+            const auto colOutId = colIt->second.fColumnId;
+            if (std::find(activeIds.begin(), activeIds.end(), colOutId) == activeIds.end()) {
+               mergeData.fDestination.CommitSuppressedColumn(ROOT::Internal::RPageStorage::ColumnHandle_t{colOutId});
+            }
+         }
+      }
 
       // For each cluster, the "missing columns" are the union of the extraDstColumns and the common columns
       // that are not present in the cluster. We generate zero pages for all of them.
+      // Note that this does NOT include suppressed columns.
       missingColumns.resize(extraDstColumns.size()); // NOTE: this clears all common columns of the previous cluster
       for (size_t i = nCommonColumnsInCluster; i < commonColumns.size(); ++i)
          missingColumns.push_back(commonColumns[i]);
@@ -1163,8 +1253,9 @@ static std::optional<std::type_index> ColumnInMemoryType(std::string_view fieldT
 // earlier, we should be guaranteed that two matching columns will have at least compatible representations. NOTE:
 // srcFieldDesc and dstFieldDesc may alias.
 static void AddColumnsFromField(std::vector<RColumnMergeInfo> &columns, const ROOT::RNTupleDescriptor &srcDesc,
-                                RNTupleMergeData &mergeData, const ROOT::RFieldDescriptor &srcFieldDesc,
-                                const ROOT::RFieldDescriptor &dstFieldDesc, const std::string &prefix = "")
+                                const ColumnReprMap_t &colReprMappings, RNTupleMergeData &mergeData,
+                                const ROOT::RFieldDescriptor &srcFieldDesc, const ROOT::RFieldDescriptor &dstFieldDesc,
+                                const std::string &prefix = "")
 {
    std::string name = prefix + '.' + srcFieldDesc.GetFieldName();
 
@@ -1174,14 +1265,12 @@ static void AddColumnsFromField(std::vector<RColumnMergeInfo> &columns, const RO
 
    const auto &columnIds = srcFieldDesc.GetLogicalColumnIds();
    columns.reserve(columns.size() + columnIds.size());
-   // NOTE: here we can match the src and dst columns by column index because we forbid merging fields with
-   // different column representations.
+
    for (auto i = 0u; i < srcFieldDesc.GetLogicalColumnIds().size(); ++i) {
       auto srcColumnId = srcFieldDesc.GetLogicalColumnIds()[i];
       const auto &srcColumn = srcDesc.GetColumnDescriptor(srcColumnId);
 
       RColumnMergeInfo info{};
-      info.fColumnName = name + '.' + std::to_string(srcColumn.GetIndex());
       info.fInputId = srcColumn.GetPhysicalId();
       // NOTE(gparolini): the parent field is used when synthesizing zero pages, which happens in 2 situations:
       // 1. when adding extra dst columns (in which case we need to synthesize zero pages for the incoming src), and
@@ -1196,22 +1285,38 @@ static void AddColumnsFromField(std::vector<RColumnMergeInfo> &columns, const RO
       // properly walk up the field hierarchy.
       info.fParentNTupleDescriptor = &srcDesc;
 
+      const auto mappingsIt = colReprMappings.find(&dstFieldDesc);
+      std::uint16_t reprIndex = srcColumn.GetRepresentationIndex();
+      if (mappingsIt != colReprMappings.end()) {
+         if (auto outReprIdx = FindColumnReprMapping(mappingsIt->second, reprIndex); outReprIdx)
+            reprIndex = *outReprIdx;
+      }
+
+      info.fColumnName = name + '.' + std::to_string(srcColumn.GetIndex()) + '.' + std::to_string(reprIndex);
+
+      // const RColumnIdMapKey key{srcFieldDesc.GetFieldName(), srcColumnId, reprIndex};
       if (auto it = mergeData.fColumnIdMap.find(info.fColumnName); it != mergeData.fColumnIdMap.end()) {
+         // We had already added this column to the column id map: just copy its data.
          info.fOutputId = it->second.fColumnId;
          info.fColumnType = it->second.fColumnType;
+         info.fOutputReprIndex = reprIndex;
       } else {
          info.fOutputId = mergeData.fColumnIdMap.size();
-         // NOTE(gparolini): map the type of src column to the type of dst column.
-         // This mapping is only relevant for common columns and it's done to ensure we keep a consistent
-         // on-disk representation of the same column.
-         // This is also important to do for first source when it is used to generate the destination sink,
+         // NOTE(gparolini): map the representation index of src column to that of dst column.
+         // This mapping is only relevant for common columns and it's done to ensure we have the correct representation
+         // index in the output column metadata.
+         // TEMP review me:
+         // This is also important to do for the first source when it is used to generate the destination sink,
          // because even in that case their column representations may differ.
          // e.g. if the destination has a different compression than the source, an integer column might be
          // zigzag-encoded in the source but not in the destination.
-         auto dstColumnId = dstFieldDesc.GetLogicalColumnIds()[i];
+         assert(dstFieldDesc.GetColumnCardinality() == srcFieldDesc.GetColumnCardinality());
+         const auto dstColumnIndex = reprIndex * dstFieldDesc.GetColumnCardinality() + srcColumn.GetIndex();
+         const auto dstColumnId = dstFieldDesc.GetLogicalColumnIds()[dstColumnIndex];
          const auto &dstColumn = mergeData.fDstDescriptor.GetColumnDescriptor(dstColumnId);
          info.fColumnType = dstColumn.GetType();
-         mergeData.fColumnIdMap[info.fColumnName] = {info.fOutputId, info.fColumnType};
+         info.fOutputReprIndex = reprIndex;
+         mergeData.fColumnIdMap[info.fColumnName] = RColumnOutInfo{info.fOutputId, reprIndex, info.fColumnType};
       }
 
       if (mergeData.fMergeOpts.fExtraVerbose) {
@@ -1234,7 +1339,7 @@ static void AddColumnsFromField(std::vector<RColumnMergeInfo> &columns, const RO
    for (auto i = 0u; i < srcChildrenIds.size(); ++i) {
       const auto &srcChild = srcDesc.GetFieldDescriptor(srcChildrenIds[i]);
       const auto &dstChild = mergeData.fDstDescriptor.GetFieldDescriptor(dstChildrenIds[i]);
-      AddColumnsFromField(columns, srcDesc, mergeData, srcChild, dstChild, name);
+      AddColumnsFromField(columns, srcDesc, colReprMappings, mergeData, srcChild, dstChild, name);
    }
 }
 
@@ -1246,14 +1351,16 @@ static RColumnInfoGroup GatherColumnInfos(const RDescriptorsComparison &descCmp,
 {
    RColumnInfoGroup res;
    for (const ROOT::RFieldDescriptor *field : descCmp.fExtraDstFields) {
-      AddColumnsFromField(res.fExtraDstColumns, mergeData.fDstDescriptor, mergeData, *field, *field);
+      AddColumnsFromField(res.fExtraDstColumns, mergeData.fDstDescriptor, descCmp.fColReprMappings, mergeData, *field,
+                          *field);
    }
    for (const auto &[srcField, dstField] : descCmp.fCommonFields) {
-      AddColumnsFromField(res.fCommonColumns, srcDesc, mergeData, *srcField, *dstField);
+      AddColumnsFromField(res.fCommonColumns, srcDesc, descCmp.fColReprMappings, mergeData, *srcField, *dstField);
    }
 
    // Sort the commonColumns by ID so we can more easily tell how many common columns each cluster has
    // (since each cluster must contain all columns of the previous cluster plus potentially some new ones)
+   // XXX: double-check if this is still used
    std::sort(res.fCommonColumns.begin(), res.fCommonColumns.end(),
              [](const auto &a, const auto &b) { return a.fInputId < b.fInputId; });
 
@@ -1267,9 +1374,11 @@ static void PrefillColumnMap(const ROOT::RNTupleDescriptor &desc, const ROOT::RF
    for (const auto &colId : fieldDesc.GetLogicalColumnIds()) {
       const auto &colDesc = desc.GetColumnDescriptor(colId);
       RColumnOutInfo info{};
-      const auto colName = name + '.' + std::to_string(colDesc.GetIndex());
       info.fColumnId = colDesc.GetLogicalId();
       info.fColumnType = colDesc.GetType();
+      // const RColumnIdMapKey key{fieldDesc.GetFieldName(), colId, colDesc.GetRepresentationIndex()};
+      const auto colName =
+         name + '.' + std::to_string(colDesc.GetIndex()) + '.' + std::to_string(colDesc.GetRepresentationIndex());
       colIdMap[colName] = info;
    }
 
@@ -1397,13 +1506,15 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
 
       // Extend columns if needed
       for (const auto &[fieldDesc, extensions] : descCmp.fColReprExtensions) {
-         for (const auto &extension : extensions)
-            fDestination->ExtendColumns(*fieldDesc, extension.fSourceRepr);
+         auto &mappings = descCmp.fColReprMappings[fieldDesc];
+         for (const auto &extension : extensions) {
+            fDestination->ExtendColumns(mergeData.fDstDescriptor, *fieldDesc, extension.fSourceRepr);
+            mappings.push_back(extension);
+         }
       }
 
       // handle extra src fields
-      // TODO: handle col repr extensions differently (probably always extend them even in non-Union mode)
-      if (!descCmp.fExtraSrcFields.empty()) {// || !descCmp.fColReprExtensions.empty()) {
+      if (!descCmp.fExtraSrcFields.empty()) { // || !descCmp.fColReprExtensions.empty()) {
          if (mergeOpts.fMergingMode == ENTupleMergingMode::kUnion) {
             // late model extension for all fExtraSrcFields in Union mode
             auto res = ExtendDestinationModel(descCmp, *fModel, mergeData);

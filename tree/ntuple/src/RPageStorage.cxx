@@ -1056,25 +1056,57 @@ ROOT::Internal::RPagePersistentSink::InitFromDescriptor(const ROOT::RNTupleDescr
 }
 
 // FIXME: this should not be done one repr at a time!
-void ROOT::Internal::RPagePersistentSink::ExtendColumns(const ROOT::RFieldDescriptor &field, std::span<const ENTupleColumnType> newRepresentation)
+void ROOT::Internal::RPagePersistentSink::ExtendColumns(const ROOT::RNTupleDescriptor &descriptor,
+                                                        const ROOT::RFieldDescriptor &field,
+                                                        std::span<const ENTupleColumnType> newRepresentation)
 {
    fDescriptorBuilder.ShiftAliasColumns(newRepresentation.size());
 
    std::uint16_t columnIndex = 0;
    const auto firstPhysicalIndex = fDescriptorBuilder.GetDescriptor().GetNPhysicalColumns();
    const auto reprIndex = field.GetLogicalColumnIds().size() / field.GetColumnCardinality();
+   R__ASSERT(field.GetLogicalColumnIds().size() > 0);
    for (auto columnType : newRepresentation) {
+      const auto firstReprColumnId = field.GetLogicalColumnIds()[columnIndex];
+      const auto &firstReprColumnRange = fOpenColumnRanges.at(firstReprColumnId);
+      const auto [rangeMin, rangeMax] = ROOT::Internal::RColumnElementBase::GetValidBitRange(columnType);
+      // TODO: currently not handling variable-precision columns.
+      R__ASSERT(rangeMin == rangeMax);
+      const auto columnId = firstPhysicalIndex + columnIndex;
       RColumnDescriptorBuilder columnBuilder;
-      columnBuilder.LogicalColumnId(firstPhysicalIndex + columnIndex)
-         .PhysicalColumnId(firstPhysicalIndex + columnIndex)
+      columnBuilder.LogicalColumnId(columnId)
+         .PhysicalColumnId(columnId)
          .FieldId(field.GetId())
-         .BitsOnStorage(source.GetBitsOnStorage())
-         .ValueRange(ROOT::Internal::RColumnElementBase::GetValidBitRange(columnType))
+         .BitsOnStorage(rangeMax)
          .Type(columnType)
          .Index(columnIndex)
+         // NOTE: marking this column as suppressed
+         .FirstElementIndex(-firstReprColumnRange.GetFirstElementIndex())
          .RepresentationIndex(reprIndex);
       fDescriptorBuilder.AddColumn(columnBuilder.MakeDescriptor().Unwrap());
+
+      // const auto &firstReprColumn = descriptor.GetColumnDescriptor();
+      ROOT::RClusterDescriptor::RColumnRange columnRange;
+      columnRange.SetPhysicalColumnId(columnId);
+      // XXX: this is potentially slow, in principle just need to know the firstElemIdx
+      // and nElems of the 0th representation column.
+      // columnRange.SetFirstElementIndex(descriptor.GetNElements(firstReprColumn.GetPhysicalId()));
+      (void)descriptor;
+      columnRange.SetFirstElementIndex(firstReprColumnRange.GetFirstElementIndex());
+      columnRange.SetNElements(0);
+      columnRange.SetCompressionSettings(GetWriteOptions().GetCompression());
+      fOpenColumnRanges.emplace_back(columnRange);
+
+      ROOT::RClusterDescriptor::RPageRange pageRange;
+      pageRange.SetPhysicalColumnId(columnId);
+      fOpenPageRanges.emplace_back(std::move(pageRange));
+
+      // fSerializationContext.MapPhysicalColumnId(columnId);
+
+      ++columnIndex;
    }
+
+   fSerializationContext.MapSchema(descriptor, /*forHeaderExtension=*/true);
 }
 
 void ROOT::Internal::RPagePersistentSink::CommitSuppressedColumn(ColumnHandle_t columnHandle)
