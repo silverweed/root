@@ -196,6 +196,13 @@ struct RTFDatetime {
                   tm.tm_min << 6 | tm.tm_sec;
    }
    explicit RTFDatetime(RUInt32BE val) : fDatetime(val) {}
+
+   static RTFDatetime Reproducible()
+   {
+      TDatime datime{1};
+      RUInt32BE val{datime.Get()};
+      return RTFDatetime(val);
+   }
 };
 
 /// The key part of a TFile record excluding the class, object, and title names
@@ -221,7 +228,7 @@ struct RTFKey {
 
    RTFKey() : fInfoLong() {}
    RTFKey(std::uint64_t seekKey, std::uint64_t seekPdir, const RTFString &clName, const RTFString &objName,
-          const RTFString &titleName, std::size_t szObjInMem, std::size_t szObjOnDisk = 0)
+          const RTFString &titleName, std::size_t szObjInMem, std::size_t szObjOnDisk = 0, bool reproducible = false)
    {
       R__ASSERT(szObjInMem <= std::numeric_limits<std::uint32_t>::max());
       R__ASSERT(szObjOnDisk <= std::numeric_limits<std::uint32_t>::max());
@@ -233,6 +240,9 @@ struct RTFKey {
       fInfoLong.fSeekPdir = seekPdir;
       // Depends on fKeyLen being set
       fNbytes = fKeyLen + ((szObjOnDisk == 0) ? szObjInMem : szObjOnDisk);
+
+      if (reproducible)
+         fDatetime = RTFDatetime::Reproducible();
    }
 
    std::uint32_t GetSize() const
@@ -956,12 +966,12 @@ ROOT::RResult<void> ROOT::Internal::RMiniFileReader::TryReadBuffer(void *buffer,
 /// Prepare a blob key in the provided buffer, which must provide space for kBlobKeyLen bytes. Note that the array type
 /// is purely documentation, the argument is actually just a pointer.
 void ROOT::Internal::RNTupleFileWriter::PrepareBlobKey(std::int64_t offset, size_t nbytes, size_t len,
-                                                       unsigned char buffer[kBlobKeyLen])
+                                                       unsigned char buffer[kBlobKeyLen], bool reproducible)
 {
    RTFString strClass{kBlobClassName};
    RTFString strObject;
    RTFString strTitle;
-   RTFKey keyHeader(offset, RTFHeader::kBEGIN, strClass, strObject, strTitle, len, nbytes);
+   RTFKey keyHeader(offset, RTFHeader::kBEGIN, strClass, strObject, strTitle, len, nbytes, reproducible);
    R__ASSERT(keyHeader.fKeyLen == kBlobKeyLen);
 
    // Copy structures into the buffer.
@@ -1139,11 +1149,12 @@ ROOT::Internal::RNTupleFileWriter::RImplSimple::WriteKey(const void *buffer, std
 std::uint64_t ROOT::Internal::RNTupleFileWriter::RImplSimple::ReserveBlobKey(std::size_t nbytes, std::size_t len,
                                                                              unsigned char keyBuffer[kBlobKeyLen])
 {
+   const bool reproducible = false;
    if (keyBuffer) {
-      PrepareBlobKey(fKeyOffset, nbytes, len, keyBuffer);
+      PrepareBlobKey(fKeyOffset, nbytes, len, keyBuffer, reproducible);
    } else {
       unsigned char localKeyBuffer[kBlobKeyLen];
-      PrepareBlobKey(fKeyOffset, nbytes, len, localKeyBuffer);
+      PrepareBlobKey(fKeyOffset, nbytes, len, localKeyBuffer, reproducible);
       Write(localKeyBuffer, kBlobKeyLen, fKeyOffset);
    }
 
@@ -1157,8 +1168,9 @@ std::uint64_t ROOT::Internal::RNTupleFileWriter::RImplSimple::ReserveBlobKey(std
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-std::uint64_t ROOT::Internal::RNTupleFileWriter::ReserveBlobKey(T &caller, TFile &file, std::size_t nbytes,
-                                                                std::size_t len, unsigned char keyBuffer[kBlobKeyLen])
+std::uint64_t
+ROOT::Internal::RNTupleFileWriter::ReserveBlobKey(T &caller, TFile &file, std::size_t nbytes, std::size_t len,
+                                                  unsigned char keyBuffer[kBlobKeyLen], bool reproducible)
 {
    std::uint64_t offsetKey;
    ROOT::Internal::RKeyBlob keyBlob(&file);
@@ -1167,10 +1179,10 @@ std::uint64_t ROOT::Internal::RNTupleFileWriter::ReserveBlobKey(T &caller, TFile
    keyBlob.Reserve(nbytes, &offsetKey);
 
    if (keyBuffer) {
-      PrepareBlobKey(offsetKey, nbytes, len, keyBuffer);
+      PrepareBlobKey(offsetKey, nbytes, len, keyBuffer, reproducible);
    } else {
       unsigned char localKeyBuffer[kBlobKeyLen];
-      PrepareBlobKey(offsetKey, nbytes, len, localKeyBuffer);
+      PrepareBlobKey(offsetKey, nbytes, len, localKeyBuffer, reproducible);
       caller.Write(localKeyBuffer, kBlobKeyLen, offsetKey);
    }
 
@@ -1197,7 +1209,10 @@ void ROOT::Internal::RNTupleFileWriter::RImplTFile::Write(const void *buffer, si
 std::uint64_t ROOT::Internal::RNTupleFileWriter::RImplTFile::ReserveBlobKey(size_t nbytes, size_t len,
                                                                             unsigned char keyBuffer[kBlobKeyLen])
 {
-   auto offsetData = RNTupleFileWriter::ReserveBlobKey(*this, *fDirectory->GetFile(), nbytes, len, keyBuffer);
+   bool reproducible = fDirectory->IsA()->InheritsFrom(TFile::Class()) &&
+                       static_cast<TFile *>(fDirectory)->TestBit(TFile::kReproducible);
+   auto offsetData =
+      RNTupleFileWriter::ReserveBlobKey(*this, *fDirectory->GetFile(), nbytes, len, keyBuffer, reproducible);
    return offsetData;
 }
 
@@ -1216,7 +1231,8 @@ std::uint64_t ROOT::Internal::RNTupleFileWriter::RImplRFile::ReserveBlobKey(size
                                                                             unsigned char keyBuffer[kBlobKeyLen])
 {
    auto *file = ROOT::Experimental::Internal::GetRFileTFile(*fFile);
-   auto offsetData = RNTupleFileWriter::ReserveBlobKey(*this, *file, nbytes, len, keyBuffer);
+   bool reproducible = false;
+   auto offsetData = RNTupleFileWriter::ReserveBlobKey(*this, *file, nbytes, len, keyBuffer, reproducible);
    return offsetData;
 }
 

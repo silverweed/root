@@ -199,8 +199,8 @@ private:
    };
 
    template <typename T>
-   static std::uint64_t
-   ReserveBlobKey(T &caller, TFile &file, std::size_t nbytes, std::size_t len, unsigned char keyBuffer[kBlobKeyLen]);
+   static std::uint64_t ReserveBlobKey(T &caller, TFile &file, std::size_t nbytes, std::size_t len,
+                                       unsigned char keyBuffer[kBlobKeyLen], bool reproducible);
 
    /// RImplSimple: for simple use cases, survives without libRIO dependency
    /// RImplTFile: for updating existing files and for storing more than just an RNTuple in the file
@@ -285,7 +285,8 @@ public:
 
    /// Prepares buffer for a new record as an RBlob key at offset.
    /// (Note that the array type is purely documentation, the argument is actually just a pointer.)
-   static void PrepareBlobKey(std::int64_t offset, size_t nbytes, size_t len, unsigned char buffer[kBlobKeyLen]);
+   static void
+   PrepareBlobKey(std::int64_t offset, size_t nbytes, size_t len, unsigned char buffer[kBlobKeyLen], bool reproducible);
 
    /// Reserves a new record as an RBlob key in the file. If keyBuffer is specified, it must be written *before* the
    /// returned offset. (Note that the array type is purely documentation, the argument is actually just a pointer.)
