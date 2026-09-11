@@ -34,6 +34,10 @@ class RNTupleWriteOptions;
 class RNTupleModel;
 class RNTupleWriter;
 
+namespace Experimental::Internal {
+class RNTupleMerger;
+}
+
 namespace Detail {
 class RRawPtrWriteEntry;
 } // namespace Detail
@@ -135,6 +139,7 @@ that were used for writing and are no longer connected to a page sink.
 */
 // clang-format on
 class RNTupleModel {
+   friend class ROOT::Experimental::Internal::RNTupleMerger;
    friend ROOT::RFieldZero &Internal::GetFieldZeroOfModel(RNTupleModel &);
    friend Internal::RProjectedFields &Internal::GetProjectedFieldsOfModel(RNTupleModel &);
    friend const Internal::RProjectedFields &Internal::GetProjectedFieldsOfModel(const RNTupleModel &);
