@@ -140,10 +140,10 @@ ROOT::RNTupleModel &ROOT::RNTupleWriter::GetUpdatableModel()
    return *fFillContext.fModel;
 }
 
-void ROOT::RNTupleWriter::CommitDataset()
+ROOT::Internal::RNTupleLink ROOT::RNTupleWriter::CommitDataset()
 {
    if (fFillContext.GetModel().IsExpired())
-      return;
+      return {}; // XXX ?
 
    CommitCluster(true /* commitClusterGroup */);
 
@@ -152,8 +152,9 @@ void ROOT::RNTupleWriter::CommitDataset()
       CloseAttributeSetImpl(*attrSet);
    }
 
-   fFillContext.fSink->CommitDataset();
+   auto link = fFillContext.fSink->CommitDataset();
    fFillContext.fModel->Expire();
+   return link;
 }
 
 std::unique_ptr<ROOT::RNTupleWriter>

@@ -24,10 +24,12 @@
 
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 namespace ROOT {
 
 class RNTuple;
+class RNTupleWriter;
 
 namespace Internal {
 class RPageAllocator;
@@ -71,6 +73,17 @@ enum class ENTupleMergeVersionBehavior {
    kAbortOnHigherVersion
 };
 
+enum class ENTupleAttributeMergeBehavior {
+   /// The merger will try to merge all attributes of the source RNTuples and will abort the entire merging if an error
+   /// is encountered.
+   kMustMerge,
+   /// The merger will try to merge all attributes of the source RNTuples and will skip attributes that cannot be merged
+   /// (reporting a warning)
+   kTryMerge,
+   /// The merger will not try to merge attributes
+   kDrop
+};
+
 struct RColumnMergeInfo;
 struct RNTupleMergeData;
 struct RSealedPageMergeData;
@@ -96,6 +109,11 @@ struct RNTupleMergeOptions {
    ENTupleMergeErrBehavior fErrBehavior = ENTupleMergeErrBehavior::kAbort;
    /// Determines how the Merge function behaves depending on the RNTuple sources' version.
    ENTupleMergeVersionBehavior fVersionBehavior = ENTupleMergeVersionBehavior::kWarnOnHigherVersion;
+   /// Determines how the Merge function behaves in regards to attributes present in the sources.
+   /// If attributes are merged (default), the output RNTuple will contain the union of all attribute sets present
+   /// in the merge sources. The schema of each attribute set is determined by the first source that contains it:
+   /// each following attribute set with the same name must have exactly the same schema.
+   ENTupleAttributeMergeBehavior fAttrMergeBehavior = ENTupleAttributeMergeBehavior::kMustMerge;
    /// If true, the merger will emit further diagnostics and information.
    bool fExtraVerbose = false;
 };
@@ -128,6 +146,12 @@ class RNTupleMerger final {
    ROOT::RResult<void>
    MergeSourceClusters(ROOT::Internal::RPageSource &source, std::span<RColumnMergeInfo> commonColumns,
                        std::span<const RColumnMergeInfo> extraDstColumns, RNTupleMergeData &mergeData);
+
+   [[nodiscard]]
+   ROOT::RResult<void>
+   MergeSourceAttributes(ROOT::Internal::RPageSource &source, const RNTupleMergeData &mergeData,
+                         std::unordered_map<std::string, std::unique_ptr<ROOT::RNTupleWriter>> &outAttrSetWriters,
+                         ROOT::NTupleSize_t attrEntryStartOffset);
 
    /// Creates a RNTupleMerger with the given destination.
    /// The model must be given if and only if `destination` has been initialized with that model

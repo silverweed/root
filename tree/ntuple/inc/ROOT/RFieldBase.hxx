@@ -824,6 +824,8 @@ private:
       }
    }
 
+   // TEMP
+   public:
    std::size_t Append() { return fField->Append(fObjPtr.get()); }
 
 public:
