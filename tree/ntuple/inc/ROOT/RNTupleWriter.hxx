@@ -51,6 +51,10 @@ std::unique_ptr<RNTupleWriter>
 RNTupleWriter_Append(std::unique_ptr<ROOT::RNTupleModel> model, std::string_view ntuplePath,
                      ROOT::Experimental::RFile &file,
                      const ROOT::RNTupleWriteOptions &options = ROOT::RNTupleWriteOptions());
+namespace Internal {
+class RNTupleMerger;
+}
+
 } // namespace Experimental
 
 namespace Internal {
@@ -115,7 +119,8 @@ On I/O errors, a ROOT::RException is thrown.
 */
 // clang-format on
 class RNTupleWriter {
-   friend ROOT::RNTupleModel::RUpdater;
+   friend class ROOT::RNTupleModel::RUpdater;
+   friend class ROOT::Experimental::Internal::RNTupleMerger;
    friend std::unique_ptr<RNTupleWriter>
       Internal::CreateRNTupleWriter(std::unique_ptr<ROOT::RNTupleModel>, std::unique_ptr<Internal::RPageSink>);
    friend std::unique_ptr<RNTupleWriter>
@@ -219,7 +224,8 @@ public:
    /// Closes the underlying file (page sink) and expires the model. Automatically called on destruct.
    /// Once the dataset is committed, calls to Fill(), [Commit|Flush]Cluster(), FlushColumns(), CreateEntry(),
    /// and model updating fail.
-   void CommitDataset();
+   // XXX: RNTupleLink is internal!
+   ROOT::Internal::RNTupleLink CommitDataset();
 
    std::unique_ptr<ROOT::REntry> CreateEntry() const { return fFillContext.CreateEntry(); }
    std::unique_ptr<ROOT::Detail::RRawPtrWriteEntry> CreateRawPtrWriteEntry() const

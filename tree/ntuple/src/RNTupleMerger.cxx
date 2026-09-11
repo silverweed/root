@@ -18,8 +18,10 @@
 #include <ROOT/RNTupleDescriptor.hxx>
 #include <ROOT/RNTupleMerger.hxx>
 #include <ROOT/RNTupleModel.hxx>
+#include <ROOT/RNTupleReader.hxx>
 #include <ROOT/RNTupleTypes.hxx>
 #include <ROOT/RNTupleUtils.hxx>
+#include <ROOT/RNTupleWriter.hxx>
 #include <ROOT/RPageAllocator.hxx>
 #include <ROOT/RPageStorageFile.hxx>
 #include <ROOT/RPageStorage.hxx>
@@ -27,6 +29,7 @@
 #include <ROOT/RNTupleSerialize.hxx>
 #include <ROOT/RNTupleZip.hxx>
 #include <ROOT/RColumnElementBase.hxx>
+#include <ROOT/RNTupleAttrUtils.hxx>
 #include <TROOT.h>
 #include <TFileMergeInfo.h>
 #include <TFile.h>
@@ -1390,6 +1393,8 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
       return R__FAIL(errMsg);                                                      \
    }
 
+   std::unordered_map<std::string, std::unique_ptr<ROOT::RNTupleWriter>> outAttrSetWriters;
+
    // Merge main loop
    for (RPageSource *source : sources) {
       source->Attach(RNTupleSerializer::EDescriptorDeserializeMode::kForWriting);
@@ -1501,12 +1506,74 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
       auto res = MergeSourceClusters(*source, columnInfos.fCommonColumns, columnInfos.fExtraDstColumns, mergeData);
       if (!res)
          return R__FORWARD_ERROR(res);
+
+      // Merge attributes
+      for (const auto &attrSetDesc : srcDescriptor.GetRef().GetAttrSetIterable()) {
+         const auto attrLink =
+            ROOT::Internal::RNTupleLink{attrSetDesc.GetAnchorLocator(), attrSetDesc.GetAnchorLength()};
+         auto attrSource = source->OpenWithDifferentAnchor(attrLink);
+         auto attrReader = std::unique_ptr<ROOT::RNTupleReader>(new ROOT::RNTupleReader(std::move(attrSource), {}));
+
+         if (outAttrSetWriters.find(attrSetDesc.GetName()) == outAttrSetWriters.end()) {
+            auto attrSink = fDestination->CloneAsHidden(attrSetDesc.GetName(), {});
+            outAttrSetWriters[attrSetDesc.GetName()] =
+               std::unique_ptr<ROOT::RNTupleWriter>(new ROOT::RNTupleWriter(attrReader->GetModel().Clone(), std::move(attrSink)));
+
+            // TODO: call user defined Begin function
+         }
+
+         // Validate the attribute schema
+         auto &attrWriter = outAttrSetWriters[attrSetDesc.GetName()];
+         const auto &attrDstDesc = attrWriter->GetSink().GetDescriptor();
+         auto cmpRes = CompareDescriptorStructure(attrDstDesc, attrReader->GetDescriptor());
+         if (!cmpRes) {
+            SKIP_OR_ABORT("Incompatible attribute sets '" + attrDstDesc.GetName())
+         }
+         auto cmp = cmpRes.Unwrap();
+         if (!cmp.fExtraDstFields.empty() || !cmp.fExtraSrcFields.empty()) {
+            SKIP_OR_ABORT("attribute sets '" + attrDstDesc.GetName() + "' don't have exactly the same schema")
+         }
+
+         auto attrSrcModel = attrWriter->GetModel().Clone();
+         // std::cout << "attr entries of " << attrSetDesc.GetName() << ": " << attrReader->GetNEntries() << "\n";
+         // for (const auto &fld : attrReader->GetDescriptor().GetFieldIterable(attrReader->GetDescriptor().GetFieldZeroId())) {
+         // std::cout << "field " << fld.GetFieldName() << "\n";
+         // }
+         using namespace ROOT::Experimental::Internal::RNTupleAttributes;
+         const auto &srcEntry = attrReader->GetModel().GetDefaultEntry();
+         auto pRangeStart = srcEntry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]);
+         auto pRangeLen = srcEntry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeLen]);
+         // auto *fldUserData = static_cast<ROOT::RRecordField *>(attrReader->GetModel().FindField(kMetaFieldNames[kMetaFieldIndex_UserData]));
+         auto pUserData = srcEntry.GetPtr<void>(kMetaFieldNames[kMetaFieldIndex_UserData]);
+         auto dstEntry = attrWriter->CreateEntry();
+         // XXX: can we rewire these instead of copying?
+         auto pDstRangeStart = srcEntry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]);
+         auto pDstRangeLen = srcEntry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeLen]);
+         // auto pDstUserData = srcEntry.GetPtr<void>(kMetaFieldNames[kMetaFieldIndex_UserData]);
+         auto *fldDstUserData = static_cast<ROOT::RRecordField *>(attrWriter->GetModel().FindField(kMetaFieldNames[kMetaFieldIndex_UserData]));
+         fldDstUserData->BindValue(pUserData);
+         for (auto entryIdx : attrReader->GetEntryRange()) {
+            attrReader->LoadEntry(entryIdx);
+            *pDstRangeStart = *pRangeStart;
+            *pDstRangeLen = *pRangeLen;
+            // *pDstUserData = *pUserData;
+
+            attrWriter->Fill(*dstEntry);
+         }
+      }
    } // end loop over sources
 
    if (fDestination->GetNEntries() == 0)
       R__LOG_WARNING(NTupleMergeLog()) << "Output RNTuple '" << fDestination->GetNTupleName() << "' has no entries.";
 
    // Commit the output
+   for (const auto &[name, outAttrSet] : outAttrSetWriters) {
+      outAttrSet->FlushCluster();
+      if (outAttrSet->GetNEntries() > 0)
+         outAttrSet->CommitClusterGroup();
+      auto anchorLink = outAttrSet->CommitDataset();
+      fDestination->CommitAttributeSet(name, anchorLink);
+   }
    fDestination->CommitClusterGroup();
    fDestination->CommitDataset();
 
