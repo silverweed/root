@@ -28,3 +28,6 @@ if(geom)
     add_subdirectory(eve7)
   endif()
 endif()
+
+add_subdirectory(llr)
+add_subdirectory(llr/wgpu)

@@ -2618,7 +2618,9 @@ void TCanvas::CreatePainter()
    if (!UseGL() || fBatch || IsWeb()) {
       fPainter = nullptr;
       if (fCanvasImp) fPainter = fCanvasImp->CreatePadPainter();
-      if (!fPainter) fPainter = new TPadPainter; // Do not need plugin manager for this!
+      // TEMP
+      if (!fPainter)  fPainter = TVirtualPadPainter::PadPainter("llr");
+      // if (!fPainter) fPainter = new TPadPainter; // Do not need plugin manager for this!
    } else {
       fPainter = TVirtualPadPainter::PadPainter("gl");
       if (!fPainter) {

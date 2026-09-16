@@ -560,26 +560,26 @@ ROOT_ADD_TEST_SUBDIRECTORY(tutorials)
 #---hsimple.root---------(use the executable for clearer dependencies and proper return code)---
 # We can't build hsimple when cross compiling
 if(NOT CMAKE_CROSSCOMPILING)
-  add_custom_target(hsimple ALL DEPENDS tutorials/hsimple.root)
-  add_dependencies(hsimple onepcm)
-  add_custom_command(OUTPUT tutorials/hsimple.root
-                    VERBATIM
-                    COMMAND
-                      ${CMAKE_COMMAND} -E env
-                      ROOT_INCLUDE_PATH=${DEFAULT_ROOT_INCLUDE_PATH}
-                      ROOTIGNOREPREFIX=1
-                      ROOT_HIST=0
-                      $<TARGET_FILE:root.exe> -q -b -n
-                        -e ".L ${CMAKE_SOURCE_DIR}/tutorials/hsimple.C"
-                        -e "hsimple();"
-                        -e return
-                    WORKING_DIRECTORY tutorials
-                    DEPENDS $<TARGET_FILE:root.exe> Cling Hist Tree Gpad Graf HistPainter move_artifacts)
-  install(FILES ${CMAKE_BINARY_DIR}/tutorials/hsimple.root DESTINATION ${CMAKE_INSTALL_TUTDIR} COMPONENT tests)
+  # add_custom_target(hsimple ALL DEPENDS tutorials/hsimple.root)
+  # add_dependencies(hsimple onepcm)
+  # add_custom_command(OUTPUT tutorials/hsimple.root
+  #                   VERBATIM
+  #                   COMMAND
+  #                     ${CMAKE_COMMAND} -E env
+  #                     ROOT_INCLUDE_PATH=${DEFAULT_ROOT_INCLUDE_PATH}
+  #                     ROOTIGNOREPREFIX=1
+  #                     ROOT_HIST=0
+  #                     $<TARGET_FILE:root.exe> -q -b -n
+  #                       -e ".L ${CMAKE_SOURCE_DIR}/tutorials/hsimple.C"
+  #                       -e "hsimple();"
+  #                       -e return
+  #                   WORKING_DIRECTORY tutorials
+  #                   DEPENDS $<TARGET_FILE:root.exe> Cling Hist Tree Gpad Graf HistPainter move_artifacts)
+  # install(FILES ${CMAKE_BINARY_DIR}/tutorials/hsimple.root DESTINATION ${CMAKE_INSTALL_TUTDIR} COMPONENT tests)
 endif()
 
 if(runtime_cxxmodules)
-  add_dependencies(hsimple modules_idx)
+  # add_dependencies(hsimple modules_idx)
 endif()
 
 #---copy special headers required for building on Windows----------------------------------------

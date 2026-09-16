@@ -563,7 +563,7 @@ void TPluginManager::LoadHandlersFromPluginDirs(const char *base)
 void TPluginManager::AddHandler(const char *base, const char *regexp,
                                 const char *className, const char *pluginName,
                                 const char *ctor, const char *origin)
-{
+{  
    // make sure there is no previous handler for the same case
    RemoveHandler(base, regexp);
 
