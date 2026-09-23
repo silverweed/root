@@ -1081,6 +1081,7 @@ public:
    }
    RIterator begin() { return RIterator(this, 0); }
    RIterator end() { return RIterator(this, fFieldChildren.size()); }
+   std::size_t count() const { return fFieldChildren.size(); }
 };
 
 // clang-format off

@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <deque>
 #include <initializer_list>
+#include <utility>
 #include <vector>
 
 using ROOT::ENTupleColumnType;
@@ -407,6 +408,14 @@ struct RColumnMergeInfo {
    std::optional<std::type_index> fInMemoryType;
    const ROOT::RFieldDescriptor *fParentFieldDescriptor = nullptr;
    const ROOT::RNTupleDescriptor *fParentNTupleDescriptor = nullptr;
+};
+
+struct RNTupleSlowMergeData {
+   std::unique_ptr<ROOT::Internal::RPageSink> fSink;
+   std::unique_ptr<ROOT::RNTupleModel> fDstModel;
+   // { fieldName => field } (only top levels)
+   std::unordered_map<std::string, std::unique_ptr<ROOT::RFieldBase>> fFieldMap;
+   ROOT::NTupleSize_t fNEntries = 0;
 };
 
 // Data related to a single call of RNTupleMerger::Merge()
@@ -1322,28 +1331,98 @@ static void AddColumnExtensionsInFieldOrder(
    }
 }
 
+void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RPageSource &source,
+                                                              RNTupleSlowMergeData &mergeData)
+{
+   // 1. create fields from the first src desc, store them (or clone them for other srcs)
+   // 2. connect them to src
+   // 3. create values from them
+   // 4. clone the fields
+   // 5. connect them to sink
+   // 6. create values from them
+   // 7. bind values together
+   // 8. ???
+   // 9. profit
+
+   auto &destination = *mergeData.fSink;
+   auto srcDescGuard = source.GetSharedDescriptorGuard();
+   const auto &srcDesc = srcDescGuard.GetRef();
+   const auto &dstDesc = destination.GetDescriptor();
+
+   auto topLevelFieldsIter = srcDesc.GetTopLevelFields();
+
+   std::vector<std::pair<ROOT::RFieldBase::RValue, ROOT::RFieldBase::RValue>> values;
+   values.reserve(topLevelFieldsIter.count());
+
+   // Create and connect fields to source and sink and bind them together.
+   int nFields = 0;
+   for (const auto &srcFieldDesc : topLevelFieldsIter) {
+      // NOTE: always use the type name found in the "authoritative" source (i.e. the first one).
+      auto &srcFieldProto = mergeData.fFieldMap[srcFieldDesc.GetFieldName()];
+      if (!srcFieldProto)
+         srcFieldProto = srcFieldDesc.CreateField(srcDesc);
+
+      // TEMP: figure out how to handle descriptor comparisons
+      assert(dstDesc.FindFieldId(srcFieldDesc.GetFieldName()) != kInvalidDescriptorId);
+
+      auto srcField = srcFieldProto->Clone(srcFieldDesc.GetFieldName());
+      ROOT::Internal::CallConnectPageSourceOnField(*srcField, source);
+      assert(srcField->GetState() == ROOT::RFieldBase::EState::kConnectedToSource);
+
+      // auto dstField =
+      //    mergeData.fDstModel->GetConstField(srcFieldDesc.GetFieldName()).Clone(srcFieldDesc.GetFieldName());
+      // ROOT::Internal::CallConnectPageSinkOnField(*dstField, destination);
+
+      // auto &[srcValue, dstValue] = values.emplace_back(srcField->CreateValue(), dstField->CreateValue());
+      // dstValue.Bind(srcValue.GetPtr<void>());
+
+      auto *dstField = mergeData.fDstModel->FindField(srcFieldDesc.GetFieldName());
+      assert(dstField);
+      // ROOT::Internal::CallConnectPageSinkOnField(*dstField, destination);
+      assert(dstField->GetState() == ROOT::RFieldBase::EState::kConnectedToSink);
+      auto &[srcValue, dstValue] = values.emplace_back(srcField->CreateValue(), dstField->CreateValue());
+      dstValue.Bind(srcValue.GetPtr<void>());
+
+      ++nFields;
+   }
+
+   for (auto idx = 0u; idx < srcDesc.GetNEntries(); ++idx) {
+      for (auto &[srcValue, dstValue] : values) {
+         srcValue.Read(idx);
+         dstValue.Append();
+      }
+   }
+
+   mergeData.fNEntries += srcDesc.GetNEntries();
+}
+
 ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttributes(
    ROOT::Internal::RPageSource &source, const RNTupleMergeData &mergeData,
-   std::unordered_map<std::string, std::unique_ptr<ROOT::RNTupleWriter>> &outAttrSetWriters,
-   ROOT::NTupleSize_t attrEntryStartOffset)
+   std::unordered_map<std::string, RNTupleSlowMergeData> &outAttrSets, ROOT::NTupleSize_t attrEntryStartOffset)
 {
    for (const auto &attrSetDesc : mergeData.fSrcDescriptor->GetAttrSetIterable()) {
       const auto attrLink = ROOT::Internal::RNTupleLink{attrSetDesc.GetAnchorLocator(), attrSetDesc.GetAnchorLength()};
       auto attrSource = source.OpenWithDifferentAnchor(attrLink);
-      auto attrReader = std::unique_ptr<ROOT::RNTupleReader>(new ROOT::RNTupleReader(std::move(attrSource), {}));
+      attrSource->Attach();
+      auto attrSrcDescGuard = attrSource->GetSharedDescriptorGuard();
+      const auto &attrSrcDesc = attrSrcDescGuard.GetRef();
 
-      if (outAttrSetWriters.find(attrSetDesc.GetName()) == outAttrSetWriters.end()) {
-         auto attrSink = mergeData.fDestination.CloneAsHidden(attrSetDesc.GetName(), {});
-         outAttrSetWriters[attrSetDesc.GetName()] = std::unique_ptr<ROOT::RNTupleWriter>(
-            new ROOT::RNTupleWriter(attrReader->GetModel().Clone(), std::move(attrSink)));
+      auto &attrSetData = outAttrSets[attrSetDesc.GetName()];
+      if (!attrSetData.fSink) {
+         assert(!attrSetData.fDstModel);
+         attrSetData.fSink = mergeData.fDestination.CloneAsHidden(attrSetDesc.GetName(), {});
+         // FIXME! We need to change InitFromDescriptor so that it also connects the fields!
+         attrSetData.fDstModel = dynamic_cast<ROOT::Internal::RPagePersistentSink &>(*attrSetData.fSink)
+                                    .InitFromDescriptor(attrSrcDesc, false);
+         // attrSetData.fSink-
 
          // TODO: call user defined Begin function
       }
 
       // Validate the attribute schema
-      auto &attrWriter = outAttrSetWriters[attrSetDesc.GetName()];
-      const auto &attrDstDesc = attrWriter->GetSink().GetDescriptor();
-      auto cmpRes = CompareDescriptorStructure(attrDstDesc, attrReader->GetDescriptor());
+      const auto &attrSink = attrSetData.fSink;
+      const auto &attrDstDesc = attrSink->GetDescriptor();
+      auto cmpRes = CompareDescriptorStructure(attrDstDesc, attrSrcDesc);
       if (!cmpRes) {
          return R__FAIL("Attribute set '" + attrDstDesc.GetName() +
                         "' is incompatible with previously-seen attribute set(s) with the same name.");
@@ -1355,20 +1434,26 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
             "' don't have exactly the same schema as previously-seen attribute set(s). This is currently unsupported.");
       }
 
-      auto attrSrcModel = attrWriter->GetModel().Clone();
-
       using namespace ROOT::Experimental::Internal::RNTupleAttributes;
 
-      const auto &srcEntry = attrReader->GetModel().GetDefaultEntry();
-      auto dstEntry = attrWriter->CreateEntry();
+#if 0
+      // const auto &srcEntry = attrReader->GetModel().GetDefaultEntry();
 
       // For all fields except _rangeStart, which we need to patch, we simply set up the pointers so that
       // LoadEntry reads the data already in the destination entry, avoiding further copies.
 
-      auto srcRangeStart = srcEntry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]);
-      auto dstRangeStart = dstEntry->GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]);
+      // auto srcRangeStart = srcEntry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]);
+      // auto dstRangeStart = dstEntry->GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]);
 
-      auto *fldDstRangeLen =
+      auto fldSrcRangeStart = attrSrcDesc.GetFieldDescriptor(kMetaFieldIndex_RangeStart).CreateField(attrSrcDesc);
+      auto fldSrcRangeLen = attrSrcDesc.GetFieldDescriptor(kMetaFieldIndex_RangeLen).CreateField(attrSrcDesc);
+      auto fldSrcUserData = attrSrcDesc.GetFieldDescriptor(kMetaFieldIndex_UserData).CreateField(attrSrcDesc);
+
+      auto fldDstRangeStart = attrDstDesc.GetFieldDescriptor(kMetaFieldIndex_RangeStart).CreateField(attrDstDesc);
+      auto fldDstRangeLen = attrDstDesc.GetFieldDescriptor(kMetaFieldIndex_RangeLen).CreateField(attrDstDesc);
+      auto fldDstUserData = attrDstDesc.GetFieldDescriptor(kMetaFieldIndex_UserData).CreateField(attrDstDesc);
+
+      /*
          static_cast<ROOT::RRecordField *>(attrWriter->GetModel().FindField(kMetaFieldNames[kMetaFieldIndex_RangeLen]));
       auto dstRangeLenValue = fldDstRangeLen->CreateValue();
       auto dstRangeLenPtr = dstRangeLenValue.GetPtr<ROOT::NTupleSize_t>();
@@ -1381,13 +1466,19 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
       auto dstUserDataPtr = dstUserDataValue.GetPtr<void>();
       dstEntry->BindValue(fldDstUserData->GetFieldName(),
                           srcEntry.GetPtr<void>(kMetaFieldNames[kMetaFieldIndex_UserData]));
+                          */
 
       for (auto entryIdx : attrReader->GetEntryRange()) {
          attrReader->LoadEntry(entryIdx);
          // Patch the _rangeStart field
          *dstRangeStart = *srcRangeStart + attrEntryStartOffset;
          attrWriter->Fill(*dstEntry);
+
+         // TODO: call user-defined Fill function
       }
+#endif
+
+      DoSlowMerge(*attrSource, attrSetData);
    }
 
    return ROOT::RResult<void>::Success();
@@ -1463,7 +1554,7 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
       return R__FAIL(errMsg);                                                      \
    }
 
-   std::unordered_map<std::string, std::unique_ptr<ROOT::RNTupleWriter>> outAttrSetWriters;
+   std::unordered_map<std::string, RNTupleSlowMergeData> outAttrSets;
 
    // Merge main loop
    for (RPageSource *source : sources) {
@@ -1581,7 +1672,7 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
 
       // Merge attributes
       if (mergeOpts.fAttrMergeBehavior != ENTupleAttributeMergeBehavior::kDrop) {
-         res = MergeSourceAttributes(*source, mergeData, outAttrSetWriters, prevNumDstEntries);
+         res = MergeSourceAttributes(*source, mergeData, outAttrSets, prevNumDstEntries);
          if (!res) {
             if (mergeOpts.fAttrMergeBehavior == ENTupleAttributeMergeBehavior::kMustMerge) {
                return R__FORWARD_ERROR(res);
@@ -1598,12 +1689,15 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
       R__LOG_WARNING(NTupleMergeLog()) << "Output RNTuple '" << fDestination->GetNTupleName() << "' has no entries.";
 
    // Commit the output
-   for (const auto &[name, outAttrSet] : outAttrSetWriters) {
-      outAttrSet->FlushCluster();
-      if (outAttrSet->GetNEntries() > 0)
-         outAttrSet->CommitClusterGroup();
-      auto anchorLink = outAttrSet->CommitDataset();
+   for (const auto &[name, outAttrSet] : outAttrSets) {
+      if (outAttrSet.fNEntries > 0) {
+         outAttrSet.fSink->CommitCluster(outAttrSet.fNEntries);
+         outAttrSet.fSink->CommitClusterGroup();
+      }
+      auto anchorLink = outAttrSet.fSink->CommitDataset();
       fDestination->CommitAttributeSet(name, anchorLink);
+
+      // TODO: call user-defined End function
    }
    fDestination->CommitClusterGroup();
    fDestination->CommitDataset();

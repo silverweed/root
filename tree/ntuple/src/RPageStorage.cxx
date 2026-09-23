@@ -1166,7 +1166,8 @@ ROOT::Internal::RPagePersistentSink::InitFromDescriptor(const ROOT::RNTupleDescr
    fSerializationContext = RNTupleSerializer::SerializeHeader(nullptr, descriptor).Unwrap();
    auto buffer = MakeUninitArray<unsigned char>(fSerializationContext.GetHeaderSize());
    fSerializationContext = RNTupleSerializer::SerializeHeader(buffer.get(), descriptor).Unwrap();
-   InitImpl(buffer.get(), fSerializationContext.GetHeaderSize());
+   // InitImpl(buffer.get(), fSerializationContext.GetHeaderSize());
+   InitImpl(*model);
 
    fDescriptorBuilder.BeginHeaderExtension();
 

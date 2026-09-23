@@ -47,6 +47,10 @@ class RRawPtrWriteEntry;
 
 namespace Experimental {
 class RNTupleAttrSetReader;
+
+namespace Internal {
+class RNTupleMerger;
+}
 }
 
 namespace Internal {
@@ -90,6 +94,7 @@ class RFieldBase {
    friend class RFieldZero;                                    // to reset fParent pointer in ReleaseSubfields()
    friend class ROOT::Detail::RRawPtrWriteEntry;               // to call Append()
    friend class ROOT::Experimental::RNTupleAttrSetReader;      // for field->Read() in LoadEntry()
+   friend class ROOT::Experimental::Internal::RNTupleMerger;
    friend struct ROOT::Internal::RFieldCallbackInjector;       // used for unit tests
    friend struct ROOT::Internal::RFieldRepresentationModifier; // used for unit tests
    friend void Internal::CallFlushColumnsOnField(RFieldBase &);
@@ -771,6 +776,7 @@ public:
 class RFieldBase::RValue final {
    friend class RFieldBase;
    friend class ROOT::REntry;
+   friend class ROOT::Experimental::Internal::RNTupleMerger;
    friend struct ROOT::Experimental::Internal::RNTupleAttrEntry;
 
 private:
@@ -824,8 +830,6 @@ private:
       }
    }
 
-   // TEMP
-   public:
    std::size_t Append() { return fField->Append(fObjPtr.get()); }
 
 public:

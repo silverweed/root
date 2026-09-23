@@ -36,10 +36,6 @@
 namespace ROOT {
 class RNTuple;
 
-namespace Experimental::Internal {
-class RNTupleMerger;
-}
-
 /// Listing of the different options that can be printed by RNTupleReader::GetInfo()
 enum class ENTupleInfo {
    kSummary,        // The RNTuple name, description, number of entries
@@ -68,9 +64,7 @@ std::cout << "myNTuple has " << reader->GetNEntries() << " entries\n";
 ~~~
 */
 // clang-format on
-class RNTupleReader {
-   friend class ROOT::Experimental::Internal::RNTupleMerger;
-   
+class RNTupleReader {  
 private:
    /// Shared data structure between the reader and all the issued active entry tokens.
    struct RActiveEntriesControlBlock {
