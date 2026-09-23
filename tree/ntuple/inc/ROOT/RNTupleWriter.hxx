@@ -51,10 +51,6 @@ std::unique_ptr<RNTupleWriter>
 RNTupleWriter_Append(std::unique_ptr<ROOT::RNTupleModel> model, std::string_view ntuplePath,
                      ROOT::Experimental::RFile &file,
                      const ROOT::RNTupleWriteOptions &options = ROOT::RNTupleWriteOptions());
-namespace Internal {
-class RNTupleMerger;
-}
-
 } // namespace Experimental
 
 namespace Internal {
@@ -120,7 +116,6 @@ On I/O errors, a ROOT::RException is thrown.
 // clang-format on
 class RNTupleWriter {
    friend class ROOT::RNTupleModel::RUpdater;
-   friend class ROOT::Experimental::Internal::RNTupleMerger;
    friend std::unique_ptr<RNTupleWriter>
       Internal::CreateRNTupleWriter(std::unique_ptr<ROOT::RNTupleModel>, std::unique_ptr<Internal::RPageSink>);
    friend std::unique_ptr<RNTupleWriter>

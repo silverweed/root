@@ -29,10 +29,10 @@
 namespace ROOT {
 
 class RNTuple;
-class RNTupleWriter;
 
 namespace Internal {
 class RPageAllocator;
+class RPageSink;
 class RClusterPool;
 } // namespace Internal
 
@@ -86,6 +86,7 @@ enum class ENTupleAttributeMergeBehavior {
 
 struct RColumnMergeInfo;
 struct RNTupleMergeData;
+struct RNTupleSlowMergeData;
 struct RSealedPageMergeData;
 
 /// Set of merging options to pass to RNTupleMerger.
@@ -134,6 +135,8 @@ class RNTupleMerger final {
    std::optional<TTaskGroup> fTaskGroup;
    std::unique_ptr<ROOT::RNTupleModel> fModel;
 
+   static void DoSlowMerge(ROOT::Internal::RPageSource &source, RNTupleSlowMergeData &mergeData);
+
    [[nodiscard]]
    ROOT::RResult<void>
    MergeCommonColumns(ROOT::Internal::RClusterPool &clusterPool, const ROOT::RClusterDescriptor &clusterDesc,
@@ -150,7 +153,7 @@ class RNTupleMerger final {
    [[nodiscard]]
    ROOT::RResult<void>
    MergeSourceAttributes(ROOT::Internal::RPageSource &source, const RNTupleMergeData &mergeData,
-                         std::unordered_map<std::string, std::unique_ptr<ROOT::RNTupleWriter>> &outAttrSetWriters,
+                         std::unordered_map<std::string, RNTupleSlowMergeData> &outAttrSets,
                          ROOT::NTupleSize_t attrEntryStartOffset);
 
    /// Creates a RNTupleMerger with the given destination.
