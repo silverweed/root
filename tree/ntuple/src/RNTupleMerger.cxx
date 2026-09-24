@@ -414,6 +414,7 @@ struct RColumnMergeInfo {
 
 struct RNTupleSlowMergeData {
    std::unique_ptr<ROOT::Internal::RPageSink> fSink;
+   std::unique_ptr<ROOT::RNTupleModel> fSrcModel;
    std::unique_ptr<ROOT::RNTupleModel> fDstModel;
    // { fieldName => field } (only top levels)
    std::unordered_map<std::string, std::unique_ptr<ROOT::RFieldBase>> fFieldMap;
@@ -1347,8 +1348,22 @@ void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RP
 
    auto topLevelFieldsIter = srcDesc.GetTopLevelFields();
 
-   std::vector<std::pair<ROOT::RFieldBase::RValue, ROOT::RFieldBase::RValue>> values;
-   values.reserve(topLevelFieldsIter.count());
+   struct FieldsAndValues {
+      ROOT::RFieldBase *fSrcField;
+      ROOT::RFieldBase *fDstField;
+      ROOT::RFieldBase::RValue fSrcValue;
+      ROOT::RFieldBase::RValue fDstValue;
+
+      FieldsAndValues(ROOT::RFieldBase *src, ROOT::RFieldBase *dst)
+         : fSrcField(src),
+           fDstField(dst),
+           fSrcValue(fSrcField->CreateValue()),
+           fDstValue(fDstField->CreateValue())
+      {
+      }
+   };
+   std::vector<FieldsAndValues> fieldsAndValues;
+   fieldsAndValues.reserve(topLevelFieldsIter.count());
 
    // Create and connect fields to source and sink and bind them together.
    int nFields = 0;
@@ -1361,9 +1376,8 @@ void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RP
       // TEMP: figure out how to handle descriptor comparisons
       assert(dstDesc.FindFieldId(srcFieldDesc.GetFieldName()) != kInvalidDescriptorId);
 
-      auto srcField = srcFieldProto->Clone(srcFieldDesc.GetFieldName());
-      ROOT::Internal::CallConnectPageSourceOnField(*srcField, source);
-      assert(srcField->GetState() == ROOT::RFieldBase::EState::kConnectedToSource);
+      // XXX: do we need to clone?
+      // auto srcField = srcFieldProto->Clone(srcFieldDesc.GetFieldName());
 
       // auto dstField =
       //    mergeData.fDstModel->GetConstField(srcFieldDesc.GetFieldName()).Clone(srcFieldDesc.GetFieldName());
@@ -1372,21 +1386,31 @@ void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RP
       // auto &[srcValue, dstValue] = values.emplace_back(srcField->CreateValue(), dstField->CreateValue());
       // dstValue.Bind(srcValue.GetPtr<void>());
 
+      auto *srcField = mergeData.fSrcModel->FindField(srcFieldDesc.GetFieldName());
+      assert(srcField);
+      assert(srcField->GetState() == ROOT::RFieldBase::EState::kConnectedToSource);
+
       auto *dstField = mergeData.fDstModel->FindField(srcFieldDesc.GetFieldName());
       assert(dstField);
-      // ROOT::Internal::CallConnectPageSinkOnField(*dstField, destination);
       assert(dstField->GetState() == ROOT::RFieldBase::EState::kConnectedToSink);
-      auto &[srcValue, dstValue] = values.emplace_back(srcField->CreateValue(), dstField->CreateValue());
-      dstValue.Bind(srcValue.GetPtr<void>());
+
+      auto &fv = fieldsAndValues.emplace_back(srcField, dstField);
+      // auto &[srcValue, dstValue] = values.emplace_back();
+      fv.fDstValue.Bind(fv.fSrcValue.GetPtr<void>());
 
       ++nFields;
    }
 
    for (auto idx = 0u; idx < srcDesc.GetNEntries(); ++idx) {
-      for (auto &[srcValue, dstValue] : values) {
+      for (auto &[_srcF, _dstF, srcValue, dstValue] : fieldsAndValues) {
          srcValue.Read(idx);
          dstValue.Append();
       }
+   }
+
+   // XXX: maybe can be done later?
+   for (auto &field : ROOT::Internal::GetFieldZeroOfModel(*mergeData.fDstModel)) {
+      ROOT::Internal::CallFlushColumnsOnField(field);
    }
 
    mergeData.fNEntries += srcDesc.GetNEntries();
@@ -1405,11 +1429,22 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
 
       auto &attrSetData = outAttrSets[attrSetDesc.GetName()];
       if (!attrSetData.fSink) {
+         assert(!attrSetData.fSrcModel);
          assert(!attrSetData.fDstModel);
+         attrSetData.fSrcModel = attrSrcDesc.CreateModel();
+         attrSetData.fSrcModel->Unfreeze();
+         ROOT::Internal::CallConnectPageSourceOnField(attrSetData.fSrcModel->GetMutableFieldZero(), source);
+         for (auto &f : attrSetData.fSrcModel->GetMutableFieldZero()) {
+            ROOT::Internal::CallConnectPageSourceOnField(f, source);
+         }
+         attrSetData.fSrcModel->Freeze();
+
+         attrSetData.fDstModel = attrSetData.fSrcModel->Clone();
          attrSetData.fSink = mergeData.fDestination.CloneAsHidden(attrSetDesc.GetName(), {});
+         attrSetData.fSink->Init(*attrSetData.fDstModel);
          // FIXME! We need to change InitFromDescriptor so that it also connects the fields!
-         attrSetData.fDstModel = dynamic_cast<ROOT::Internal::RPagePersistentSink &>(*attrSetData.fSink)
-                                    .InitFromDescriptor(attrSrcDesc, false);
+         // attrSetData.fDstModel = dynamic_cast<ROOT::Internal::RPagePersistentSink &>(*attrSetData.fSink)
+         //                            .InitFromDescriptor(attrSrcDesc, false);
          // attrSetData.fSink-
 
          // TODO: call user defined Begin function
@@ -1474,6 +1509,7 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
       }
 #endif
 
+      // TODO: patch _rangeStart!!
       DoSlowMerge(*attrSource, attrSetData);
    }
 
@@ -1685,13 +1721,19 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
       R__LOG_WARNING(NTupleMergeLog()) << "Output RNTuple '" << fDestination->GetNTupleName() << "' has no entries.";
 
    // Commit the output
-   for (const auto &[name, outAttrSet] : outAttrSets) {
+   for (auto &[name, outAttrSet] : outAttrSets) {
       if (outAttrSet.fNEntries > 0) {
          outAttrSet.fSink->CommitCluster(outAttrSet.fNEntries);
          outAttrSet.fSink->CommitClusterGroup();
       }
       auto anchorLink = outAttrSet.fSink->CommitDataset();
       fDestination->CommitAttributeSet(name, anchorLink);
+
+      // TEMP DEBUG
+      outAttrSet.fSrcModel.release();
+      outAttrSet.fSrcModel  = nullptr;
+      outAttrSet.fDstModel.release();
+      outAttrSet.fDstModel  = nullptr;
 
       // TODO: call user-defined End function
    }

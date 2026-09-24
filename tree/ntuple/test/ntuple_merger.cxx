@@ -4677,6 +4677,10 @@ TEST(RNTupleMerger, MergeWithAttributesSimple)
             }
          }
       }
+
+      // TEMP
+      fileGuardOut.PreserveFile();
+      break;
    }
 }
 
