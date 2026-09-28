@@ -415,6 +415,7 @@ struct RColumnMergeInfo {
 struct RNTupleSlowMergeData {
    std::unique_ptr<ROOT::Internal::RPageSink> fSink;
    std::unique_ptr<ROOT::RNTupleModel> fDstModel;
+   std::unique_ptr<REntry> fDstEntry;
    ROOT::NTupleSize_t fNEntries = 0;
 };
 
@@ -1327,7 +1328,8 @@ static void AddColumnExtensionsInFieldOrder(
 
 void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RPageSource &source,
                                                               ROOT::RNTupleModel &srcModel,
-                                                              RNTupleSlowMergeData &mergeData)
+                                                              RNTupleSlowMergeData &mergeData,
+                                                              RNTupleSlowMergeFillFn_t &&fillFn)
 {
    auto &destination = *mergeData.fSink;
    auto srcDescGuard = source.GetSharedDescriptorGuard();
@@ -1354,32 +1356,20 @@ void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RP
    fieldsAndValues.reserve(topLevelFieldsIter.count());
 
    auto srcEntry = srcModel.CreateBareEntry();
-   auto dstEntry = mergeData.fDstModel->CreateEntry();
+   auto &dstEntry = mergeData.fDstEntry;
 
    // Create and connect fields to source and sink and bind them together.
    for (const auto &srcFieldDesc : topLevelFieldsIter) {
       // TEMP: figure out how to handle descriptor comparisons
       assert(dstDesc.FindFieldId(srcFieldDesc.GetFieldName()) != kInvalidDescriptorId);
 
-      // auto *srcField = srcModel.FindField(srcFieldDesc.GetFieldName());
-      // assert(srcField);
-      // assert(srcField->GetState() == ROOT::RFieldBase::EState::kConnectedToSource);
-
-      // auto *dstField = mergeData.fDstModel->FindField(srcFieldDesc.GetFieldName());
-      // assert(dstField);
-      // assert(dstField->GetState() == ROOT::RFieldBase::EState::kConnectedToSink);
-
       srcEntry->BindValue(srcFieldDesc.GetFieldName(), dstEntry->GetPtr<void>(srcFieldDesc.GetFieldName()));
-      // auto &fv = fieldsAndValues.emplace_back(srcField, dstField);
-      // fv.fDstValue.Bind(fv.fSrcValue.GetPtr<void>());
    }
 
    for (auto idx = 0u; idx < srcDesc.GetNEntries(); ++idx) {
-      // for (auto &[_srcF, _dstF, srcValue, dstValue] : fieldsAndValues) {
-      //    srcValue.Read(idx);
-      //    dstValue.Append();
-      // }
       srcEntry->Read(idx);
+      if (fillFn)
+         fillFn(*dstEntry);
       dstEntry->Append();
    }
 
@@ -1411,6 +1401,7 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
          attrSetData.fDstModel = srcModel->Clone();
          attrSetData.fSink = mergeData.fDestination.CloneAsHidden(attrSetDesc.GetName(), {});
          attrSetData.fSink->Init(*attrSetData.fDstModel);
+         attrSetData.fDstEntry = attrSetData.fDstModel->CreateEntry();
 
          // TODO: call user defined Begin function
       }
@@ -1433,8 +1424,8 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
             "' don't have exactly the same schema as previously-seen attribute set(s). This is currently unsupported.");
       }
 
-#if 0
       using namespace ROOT::Experimental::Internal::RNTupleAttributes;
+#if 0
 
       // const auto &srcEntry = attrReader->GetModel().GetDefaultEntry();
 
@@ -1477,8 +1468,9 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
       }
 #endif
 
-      // TODO: patch _rangeStart!!
-      DoSlowMerge(*attrSource, *srcModel, attrSetData);
+      DoSlowMerge(*attrSource, *srcModel, attrSetData, [attrEntryStartOffset] (REntry &entry) {
+         *entry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]) += attrEntryStartOffset;
+      });
    }
 
    return ROOT::RResult<void>::Success();

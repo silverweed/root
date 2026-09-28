@@ -29,6 +29,7 @@
 namespace ROOT {
 
 class RNTuple;
+class REntry;
 
 namespace Internal {
 class RPageAllocator;
@@ -119,6 +120,8 @@ struct RNTupleMergeOptions {
    bool fExtraVerbose = false;
 };
 
+using RNTupleSlowMergeFillFn_t = std::function<void(ROOT::REntry &)>;
+
 // clang-format off
 /**
  * \class ROOT::Experimental::Internal::RNTupleMerger
@@ -135,7 +138,8 @@ class RNTupleMerger final {
    std::optional<TTaskGroup> fTaskGroup;
    std::unique_ptr<ROOT::RNTupleModel> fModel;
 
-   static void DoSlowMerge(ROOT::Internal::RPageSource &source, ROOT::RNTupleModel &srcModel, RNTupleSlowMergeData &mergeData);
+   static void DoSlowMerge(ROOT::Internal::RPageSource &source, ROOT::RNTupleModel &srcModel,
+                           RNTupleSlowMergeData &mergeData, RNTupleSlowMergeFillFn_t &&fillFn);
 
    [[nodiscard]]
    ROOT::RResult<void>
