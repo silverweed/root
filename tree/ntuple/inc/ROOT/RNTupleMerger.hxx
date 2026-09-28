@@ -135,7 +135,7 @@ class RNTupleMerger final {
    std::optional<TTaskGroup> fTaskGroup;
    std::unique_ptr<ROOT::RNTupleModel> fModel;
 
-   static void DoSlowMerge(ROOT::Internal::RPageSource &source, RNTupleSlowMergeData &mergeData);
+   static void DoSlowMerge(ROOT::Internal::RPageSource &source, ROOT::RNTupleModel &srcModel, RNTupleSlowMergeData &mergeData);
 
    [[nodiscard]]
    ROOT::RResult<void>

@@ -414,10 +414,7 @@ struct RColumnMergeInfo {
 
 struct RNTupleSlowMergeData {
    std::unique_ptr<ROOT::Internal::RPageSink> fSink;
-   std::unique_ptr<ROOT::RNTupleModel> fSrcModel;
    std::unique_ptr<ROOT::RNTupleModel> fDstModel;
-   // { fieldName => field } (only top levels)
-   std::unordered_map<std::string, std::unique_ptr<ROOT::RFieldBase>> fFieldMap;
    ROOT::NTupleSize_t fNEntries = 0;
 };
 
@@ -1329,18 +1326,9 @@ static void AddColumnExtensionsInFieldOrder(
 }
 
 void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RPageSource &source,
+                                                              ROOT::RNTupleModel &srcModel,
                                                               RNTupleSlowMergeData &mergeData)
 {
-   // 1. create fields from the first src desc, store them (or clone them for other srcs)
-   // 2. connect them to src
-   // 3. create values from them
-   // 4. clone the fields
-   // 5. connect them to sink
-   // 6. create values from them
-   // 7. bind values together
-   // 8. ???
-   // 9. profit
-
    auto &destination = *mergeData.fSink;
    auto srcDescGuard = source.GetSharedDescriptorGuard();
    const auto &srcDesc = srcDescGuard.GetRef();
@@ -1365,47 +1353,34 @@ void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RP
    std::vector<FieldsAndValues> fieldsAndValues;
    fieldsAndValues.reserve(topLevelFieldsIter.count());
 
-   // Create and connect fields to source and sink and bind them together.
-   int nFields = 0;
-   for (const auto &srcFieldDesc : topLevelFieldsIter) {
-      // NOTE: always use the type name found in the "authoritative" source (i.e. the first one).
-      auto &srcFieldProto = mergeData.fFieldMap[srcFieldDesc.GetFieldName()];
-      if (!srcFieldProto)
-         srcFieldProto = srcFieldDesc.CreateField(srcDesc);
+   auto srcEntry = srcModel.CreateBareEntry();
+   auto dstEntry = mergeData.fDstModel->CreateEntry();
 
+   // Create and connect fields to source and sink and bind them together.
+   for (const auto &srcFieldDesc : topLevelFieldsIter) {
       // TEMP: figure out how to handle descriptor comparisons
       assert(dstDesc.FindFieldId(srcFieldDesc.GetFieldName()) != kInvalidDescriptorId);
 
-      // XXX: do we need to clone?
-      // auto srcField = srcFieldProto->Clone(srcFieldDesc.GetFieldName());
+      // auto *srcField = srcModel.FindField(srcFieldDesc.GetFieldName());
+      // assert(srcField);
+      // assert(srcField->GetState() == ROOT::RFieldBase::EState::kConnectedToSource);
 
-      // auto dstField =
-      //    mergeData.fDstModel->GetConstField(srcFieldDesc.GetFieldName()).Clone(srcFieldDesc.GetFieldName());
-      // ROOT::Internal::CallConnectPageSinkOnField(*dstField, destination);
+      // auto *dstField = mergeData.fDstModel->FindField(srcFieldDesc.GetFieldName());
+      // assert(dstField);
+      // assert(dstField->GetState() == ROOT::RFieldBase::EState::kConnectedToSink);
 
-      // auto &[srcValue, dstValue] = values.emplace_back(srcField->CreateValue(), dstField->CreateValue());
-      // dstValue.Bind(srcValue.GetPtr<void>());
-
-      auto *srcField = mergeData.fSrcModel->FindField(srcFieldDesc.GetFieldName());
-      assert(srcField);
-      assert(srcField->GetState() == ROOT::RFieldBase::EState::kConnectedToSource);
-
-      auto *dstField = mergeData.fDstModel->FindField(srcFieldDesc.GetFieldName());
-      assert(dstField);
-      assert(dstField->GetState() == ROOT::RFieldBase::EState::kConnectedToSink);
-
-      auto &fv = fieldsAndValues.emplace_back(srcField, dstField);
-      // auto &[srcValue, dstValue] = values.emplace_back();
-      fv.fDstValue.Bind(fv.fSrcValue.GetPtr<void>());
-
-      ++nFields;
+      srcEntry->BindValue(srcFieldDesc.GetFieldName(), dstEntry->GetPtr<void>(srcFieldDesc.GetFieldName()));
+      // auto &fv = fieldsAndValues.emplace_back(srcField, dstField);
+      // fv.fDstValue.Bind(fv.fSrcValue.GetPtr<void>());
    }
 
    for (auto idx = 0u; idx < srcDesc.GetNEntries(); ++idx) {
-      for (auto &[_srcF, _dstF, srcValue, dstValue] : fieldsAndValues) {
-         srcValue.Read(idx);
-         dstValue.Append();
-      }
+      // for (auto &[_srcF, _dstF, srcValue, dstValue] : fieldsAndValues) {
+      //    srcValue.Read(idx);
+      //    dstValue.Append();
+      // }
+      srcEntry->Read(idx);
+      dstEntry->Append();
    }
 
    // XXX: maybe can be done later?
@@ -1424,31 +1399,24 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
       const auto attrLink = ROOT::Internal::RNTupleLink{attrSetDesc.GetAnchorLocator(), attrSetDesc.GetAnchorLength()};
       auto attrSource = source.OpenWithDifferentAnchor(attrLink);
       attrSource->Attach();
-      auto attrSrcDescGuard = attrSource->GetSharedDescriptorGuard();
-      const auto &attrSrcDesc = attrSrcDescGuard.GetRef();
+
+      auto srcModel = attrSource->GetSharedDescriptorGuard()->CreateModel();
+      srcModel->Unfreeze();
+      ROOT::Internal::CallConnectPageSourceOnField(srcModel->GetMutableFieldZero(), *attrSource);
+      srcModel->Freeze();
 
       auto &attrSetData = outAttrSets[attrSetDesc.GetName()];
       if (!attrSetData.fSink) {
-         assert(!attrSetData.fSrcModel);
          assert(!attrSetData.fDstModel);
-         attrSetData.fSrcModel = attrSrcDesc.CreateModel();
-         attrSetData.fSrcModel->Unfreeze();
-         ROOT::Internal::CallConnectPageSourceOnField(attrSetData.fSrcModel->GetMutableFieldZero(), source);
-         for (auto &f : attrSetData.fSrcModel->GetMutableFieldZero()) {
-            ROOT::Internal::CallConnectPageSourceOnField(f, source);
-         }
-         attrSetData.fSrcModel->Freeze();
-
-         attrSetData.fDstModel = attrSetData.fSrcModel->Clone();
+         attrSetData.fDstModel = srcModel->Clone();
          attrSetData.fSink = mergeData.fDestination.CloneAsHidden(attrSetDesc.GetName(), {});
          attrSetData.fSink->Init(*attrSetData.fDstModel);
-         // FIXME! We need to change InitFromDescriptor so that it also connects the fields!
-         // attrSetData.fDstModel = dynamic_cast<ROOT::Internal::RPagePersistentSink &>(*attrSetData.fSink)
-         //                            .InitFromDescriptor(attrSrcDesc, false);
-         // attrSetData.fSink-
 
          // TODO: call user defined Begin function
       }
+
+      auto attrSrcDescGuard = attrSource->GetSharedDescriptorGuard();
+      const auto &attrSrcDesc = attrSrcDescGuard.GetRef();
 
       // Validate the attribute schema
       const auto &attrSink = attrSetData.fSink;
@@ -1465,9 +1433,9 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
             "' don't have exactly the same schema as previously-seen attribute set(s). This is currently unsupported.");
       }
 
+#if 0
       using namespace ROOT::Experimental::Internal::RNTupleAttributes;
 
-#if 0
       // const auto &srcEntry = attrReader->GetModel().GetDefaultEntry();
 
       // For all fields except _rangeStart, which we need to patch, we simply set up the pointers so that
@@ -1510,7 +1478,7 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
 #endif
 
       // TODO: patch _rangeStart!!
-      DoSlowMerge(*attrSource, attrSetData);
+      DoSlowMerge(*attrSource, *srcModel, attrSetData);
    }
 
    return ROOT::RResult<void>::Success();
@@ -1728,12 +1696,6 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
       }
       auto anchorLink = outAttrSet.fSink->CommitDataset();
       fDestination->CommitAttributeSet(name, anchorLink);
-
-      // TEMP DEBUG
-      outAttrSet.fSrcModel.release();
-      outAttrSet.fSrcModel  = nullptr;
-      outAttrSet.fDstModel.release();
-      outAttrSet.fDstModel  = nullptr;
 
       // TODO: call user-defined End function
    }
