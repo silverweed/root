@@ -4606,7 +4606,6 @@ TEST(RNTupleMerger, MergeWithAttributesSimple)
    // These files both have 2 attribute sets, one of which (AttrSet1) is common to both.
    // We expect the output file to contain all 3 attribute sets, where AttrSet1 has the union of both sets' entries.
    FileRaii fileGuard1("test_ntuple_merge_attr1.root");
-   fileGuard1.PreserveFile();
    {
       auto model = RNTupleModel::Create();
       auto fieldFoo = model->MakeField<int>("foo");
@@ -4677,10 +4676,6 @@ TEST(RNTupleMerger, MergeWithAttributesSimple)
             }
          }
       }
-
-      // TEMP
-      fileGuardOut.PreserveFile();
-      break;
    }
 }
 
@@ -4693,7 +4688,6 @@ TEST(RNTupleMerger, MergeWithAttributes)
    // These files both have 2 attribute sets, one of which (AttrSet1) is common to both.
    // We expect the output file to contain all 3 attribute sets, where AttrSet1 has the union of both sets' entries.
    FileRaii fileGuard1("test_ntuple_merge_attr2_1.root");
-   fileGuard1.PreserveFile();
    {
       auto model = RNTupleModel::Create();
       auto fieldFoo = model->MakeField<int>("foo");
@@ -4791,8 +4785,8 @@ TEST(RNTupleMerger, MergeWithAttributes)
             EXPECT_EQ(attrSet2->GetNEntries(), 1);
             for (auto idx : attrSet2->GetAttributes()) {
                auto range2 = attrSet2->LoadEntry(idx, *attrEntry2);
-               EXPECT_EQ(range2.GetFirst(), 10);
-               EXPECT_EQ(range2.GetLast(), 19);
+               EXPECT_EQ(range2.GetFirst(), 0);
+               EXPECT_EQ(range2.GetLast(), 9);
                EXPECT_EQ(*pInt2, 2);
                EXPECT_EQ(*pLong2, 3);
             }
@@ -4805,28 +4799,106 @@ TEST(RNTupleMerger, MergeWithAttributes)
             EXPECT_EQ(attrSet3->GetNEntries(), 1);
             for (auto idx : attrSet3->GetAttributes()) {
                auto range3 = attrSet3->LoadEntry(idx, *attrEntry3);
-               EXPECT_EQ(range3.GetFirst(), 0);
-               EXPECT_EQ(range3.GetLast(), 9);
+               EXPECT_EQ(range3.GetFirst(), 10);
+               EXPECT_EQ(range3.GetLast(), 19);
                EXPECT_EQ(*pInt3, 5);
                EXPECT_EQ(*pStr3, "6");
             }
          }
+      }
+   }
+}
 
-         // TEMP
-         fileGuardOut.PreserveFile();
-         break;
+TEST(RNTupleMerger, MergeWithAttributesLateModelExtend)
+{
+   ROOT::TestSupport::CheckDiagsRAII diagsRAII;
+   diagsRAII.requiredDiag(kWarning, "ROOT.NTuple", "RNTuple Attributes are experimental", false);
+
+   // Write two test ntuples to be merged.
+   // These files have 1 attribute set with the same name, but the second contains extra fields.
+   // We expect the output file to contain that attribute field with the union of all attributes.
+   FileRaii fileGuard1("test_ntuple_merge_attr_ext_1.root");
+   {
+      auto model = RNTupleModel::Create();
+      auto fieldFoo = model->MakeField<int>("foo");
+      auto writer = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard1.GetPath());
+      auto attrSetModel = RNTupleModel::Create();
+      auto pAttrInt = attrSetModel->MakeField<int>("int");
+      auto attrSet = writer->CreateAttributeSet(std::move(attrSetModel), "AttrSet1");
+      auto attrRange = attrSet->BeginRange();
+      *pAttrInt = 42;
+      for (size_t i = 0; i < 10; ++i) {
+         *fieldFoo = i * 123;
+         writer->Fill();
+      }
+      attrSet->CommitRange(std::move(attrRange));
+   }
+
+   FileRaii fileGuard2("test_ntuple_merge_attr_ext_2.root");
+   {
+      auto model = RNTupleModel::Create();
+      auto fieldFoo = model->MakeField<int>("foo");
+      auto writer = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard2.GetPath());
+      auto attrSetModel = RNTupleModel::Create();
+      auto pAttrFloat = attrSetModel->MakeField<float>("float");
+      auto attrSet = writer->CreateAttributeSet(std::move(attrSetModel), "AttrSet1");
+      auto attrRange = attrSet->BeginRange();
+      *pAttrFloat = 84.f;
+      for (size_t i = 0; i < 10; ++i) {
+         *fieldFoo = i * 123;
+         writer->Fill();
+      }
+      attrSet->CommitRange(std::move(attrRange));
+   }
+   
+   std::vector<std::unique_ptr<RPageSource>> sources;
+   sources.push_back(RPageSource::Create("ntuple", fileGuard1.GetPath(), RNTupleReadOptions()));
+   sources.push_back(RPageSource::Create("ntuple", fileGuard2.GetPath(), RNTupleReadOptions()));
+   std::vector<RPageSource *> sourcePtrs;
+   for (const auto &s : sources) {
+      sourcePtrs.push_back(s.get());
+   }
+
+   // Now merge the inputs
+   for (const auto mmode : {ENTupleMergingMode::kFilter, ENTupleMergingMode::kStrict, ENTupleMergingMode::kUnion}) {
+      SCOPED_TRACE(std::string("with merging mode = ") + ToString(mmode));
+      FileRaii fileGuardOut("test_ntuple_merge_attr_ext_out.root");
+      {
+         auto destination = std::make_unique<RPageSinkFile>("ntuple", fileGuardOut.GetPath(), RNTupleWriteOptions());
+         RNTupleMerger merger{std::move(destination)};
+         RNTupleMergeOptions opts;
+         opts.fMergingMode = mmode;
+         auto res = merger.Merge(sourcePtrs, opts);
+         EXPECT_TRUE(bool(res));
+      }
+      {
+         auto reader = ROOT::RNTupleReader::Open("ntuple", fileGuardOut.GetPath());
+         EXPECT_EQ(reader->GetNEntries(), 20);
+         EXPECT_EQ(reader->GetDescriptor().GetNAttributeSets(), 1);
+         {
+            auto attrSet1 = reader->OpenAttributeSet("AttrSet1");
+            EXPECT_EQ(attrSet1->GetNEntries(), 2);
+            const auto &attrEntry1 = attrSet1->GetModel().GetDefaultEntry();
+            auto pAttrInt = attrEntry1.GetPtr<int>("int");
+            auto pAttrFloat = attrEntry1.GetPtr<float>("float");
+            for (auto idx : attrSet1->GetAttributes()) {
+               auto range1 = attrSet1->LoadEntry(idx);
+               EXPECT_EQ(range1.GetFirst(), 10 * idx);
+               EXPECT_EQ(range1.GetLast(), 10 * idx + 9);
+               EXPECT_EQ(*pAttrInt, idx < 1 ? 42 : 0);
+               EXPECT_FLOAT_EQ(*pAttrFloat, idx < 1 ? 0.f : 84.f);
+            }
+         }
       }
    }
 }
 
 TEST(RNTupleMerger, MergeThroughTFileMergerIncrementalWithAttributes)
 {
+   // Like MergeWithAttributes but the merging is incremental and done through TFileMerger.
    ROOT::TestSupport::CheckDiagsRAII diagsRAII;
    diagsRAII.requiredDiag(kWarning, "ROOT.NTuple", "RNTuple Attributes are experimental", false);
 
-   // Write two test ntuples to be merged.
-   // These files both have 2 attribute sets, one of which (AttrSet1) is common to both.
-   // We expect the output file to contain all 3 attribute sets, where AttrSet1 has the union of both sets' entries.
    FileRaii fileGuardIn("test_ntuple_merge_in_attr_incr.root");
    {
       auto model = RNTupleModel::Create();

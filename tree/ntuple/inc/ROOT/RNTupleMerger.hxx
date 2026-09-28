@@ -120,7 +120,36 @@ struct RNTupleMergeOptions {
    bool fExtraVerbose = false;
 };
 
-using RNTupleSlowMergeFillFn_t = std::function<void(ROOT::REntry &)>;
+struct RNTupleSlowMergeContext {
+   ROOT::NTupleSize_t fSourceEntryIndex = 0;
+   ROOT::NTupleSize_t fDestinationEntryIndex = 0;
+};
+
+enum class ENTupleSlowMergeResult {
+   // Don't emit this entry
+   kDrop,
+   // Emit this entry, then continue
+   kEmit,
+   // Emit this entry, then call the function again
+   kEmitMulti,
+};
+
+class RNTupleSlowMergeActions {
+public:
+   virtual ~RNTupleSlowMergeActions() = default;
+
+   virtual ENTupleSlowMergeResult OnFill(ROOT::REntry &, const RNTupleSlowMergeContext &)
+   {
+      return ENTupleSlowMergeResult::kEmit;
+   }
+
+   virtual ENTupleSlowMergeResult BeforeCommit(ROOT::REntry &, const RNTupleSlowMergeContext &)
+   {
+      return ENTupleSlowMergeResult::kDrop;
+   }
+};
+
+// using RNTupleSlowMergeFn_t = std::function<RNTupleSlowMergeResult(ROOT::REntry &, const RNTupleSlowMergeContext &)>;
 
 // clang-format off
 /**
@@ -139,7 +168,8 @@ class RNTupleMerger final {
    std::unique_ptr<ROOT::RNTupleModel> fModel;
 
    static void DoSlowMerge(ROOT::Internal::RPageSource &source, ROOT::RNTupleModel &srcModel,
-                           RNTupleSlowMergeData &mergeData, RNTupleSlowMergeFillFn_t &&fillFn);
+                           std::span<const RFieldDescriptor *const> extraDstFields,
+                           RNTupleSlowMergeData &mergeData, RNTupleSlowMergeActions &userActions);
 
    [[nodiscard]]
    ROOT::RResult<void>
@@ -155,10 +185,9 @@ class RNTupleMerger final {
                        std::span<const RColumnMergeInfo> extraDstColumns, RNTupleMergeData &mergeData);
 
    [[nodiscard]]
-   ROOT::RResult<void>
-   MergeSourceAttributes(ROOT::Internal::RPageSource &source, const RNTupleMergeData &mergeData,
-                         std::unordered_map<std::string, RNTupleSlowMergeData> &outAttrSets,
-                         ROOT::NTupleSize_t attrEntryStartOffset);
+   ROOT::RResult<void> MergeSourceAttributes(ROOT::Internal::RPageSource &source, const RNTupleMergeData &mergeData,
+                                             std::unordered_map<std::string, RNTupleSlowMergeData> &outAttrSets,
+                                             ROOT::NTupleSize_t attrEntryStartOffset);
 
    /// Creates a RNTupleMerger with the given destination.
    /// The model must be given if and only if `destination` has been initialized with that model
