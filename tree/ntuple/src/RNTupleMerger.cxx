@@ -53,6 +53,7 @@ using ROOT::Internal::RPageSourceFile;
 using ROOT::Internal::RPageStorage;
 
 using namespace ROOT::Experimental::Internal;
+using namespace ROOT::Experimental::Internal::RNTupleAttributes;
 
 static ROOT::RLogChannel &NTupleMergeLog()
 {
@@ -392,6 +393,16 @@ struct RColumnInfoGroup {
    std::vector<RColumnMergeInfo> fCommonColumns;
 };
 
+struct RAttrSlowMergeActions : public RNTupleSlowMergeActions {
+   ROOT::NTupleSize_t fAttrEntryStartOffset = 0;
+
+   ENTupleSlowMergeResult OnFill(ROOT::REntry &entry, const RNTupleSlowMergeContext &) final
+   {
+      *entry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]) += fAttrEntryStartOffset;
+      return ENTupleSlowMergeResult::kEmit;
+   }
+};
+
 } // namespace
 
 // These structs cannot be in the anon namespace becase they're used in RNTupleMerger's private interface.
@@ -417,6 +428,7 @@ struct RNTupleSlowMergeData {
    std::unique_ptr<ROOT::RNTupleModel> fDstModel;
    std::unique_ptr<REntry> fDstEntry;
    RNTupleSlowMergeContext fContext;
+   std::unique_ptr<RNTupleSlowMergeActions> fActions;
 };
 
 // Data related to a single call of RNTupleMerger::Merge()
@@ -1323,9 +1335,7 @@ static void AddColumnExtensionsInFieldOrder(
 
 void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RPageSource &source,
                                                               ROOT::RNTupleModel &srcModel,
-                                                              std::span<const RFieldDescriptor *const> extraDstFields,
-                                                              RNTupleSlowMergeData &mergeData,
-                                                              RNTupleSlowMergeActions &userActions)
+                                                              RNTupleSlowMergeData &mergeData)
 {
    auto srcDescGuard = source.GetSharedDescriptorGuard();
    const auto &srcDesc = srcDescGuard.GetRef();
@@ -1338,15 +1348,12 @@ void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RP
    for (const auto &srcFieldDesc : srcDesc.GetTopLevelFields()) {
       srcEntry->BindValue(srcFieldDesc.GetFieldName(), dstEntry->GetPtr<void>(srcFieldDesc.GetFieldName()));
    }
-   // Default-initialize extra dst fields
-   // for (const auto *field : extraDstFields)
-   //    dstEntry->EmplaceNewValue("_userData." + field->GetFieldName()); // TODO: replace with kMetaName..
 
    for (auto idx = 0u; idx < srcDesc.GetNEntries(); ++idx) {
       srcEntry->Read(idx);
       context.fSourceEntryIndex = idx;
       while (true) {
-         auto res = userActions.OnFill(*dstEntry, context);
+         auto res = mergeData.fActions->OnFill(*dstEntry, context);
          if (res == ENTupleSlowMergeResult::kDrop)
             break;
          context.fDestinationEntryIndex += 1;
@@ -1361,72 +1368,39 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
    ROOT::Internal::RPageSource &source, const RNTupleMergeData &mergeData,
    std::unordered_map<std::string, RNTupleSlowMergeData> &outAttrSets, ROOT::NTupleSize_t attrEntryStartOffset)
 {
+   using namespace ROOT::Experimental::Internal::RNTupleAttributes;
+
    for (const auto &attrSetDesc : mergeData.fSrcDescriptor->GetAttrSetIterable()) {
       const auto attrLink = ROOT::Internal::RNTupleLink{attrSetDesc.GetAnchorLocator(), attrSetDesc.GetAnchorLength()};
       auto attrSource = source.OpenWithDifferentAnchor(attrLink);
       attrSource->Attach();
 
-      RNTupleDescriptor::RCreateModelOptions cmOpts;
-      cmOpts.SetCreateBare(true);
-      auto srcModel = attrSource->GetSharedDescriptorGuard()->CreateModel(cmOpts);
-      {
-         auto &fieldZero = ROOT::Internal::GetFieldZeroOfModel(*srcModel);
-         ROOT::Internal::SetAllowFieldSubstitutions(fieldZero, true);
-         // We must not use the descriptor guard to prevent recursive locking in field.ConnectPageSource
-         ROOT::DescriptorId_t fieldZeroId = attrSource->GetSharedDescriptorGuard()->GetFieldZeroId();
-         fieldZero.SetOnDiskId(fieldZeroId);
-         // Iterate only over fieldZero's direct subfields; their descendants are recursively handled in
-         // RFieldBase::ConnectPageSource
-         for (auto &field : fieldZero.GetMutableSubfields()) {
-            // If the model has been created from the descriptor, the on-disk IDs are already set.
-            // User-provided models instead need to find their corresponding IDs in the descriptor.
-            if (field->GetOnDiskId() == ROOT::kInvalidDescriptorId) {
-               field->SetOnDiskId(
-                  attrSource->GetSharedDescriptorGuard()->FindFieldId(field->GetFieldName(), fieldZeroId));
-            }
-            ROOT::Internal::CallConnectPageSourceOnField(*field, *attrSource);
-         }
-         ROOT::Internal::SetAllowFieldSubstitutions(fieldZero, false);
-      }
-
+      // Create the destination model first, if needed.
       auto &attrSetData = outAttrSets[attrSetDesc.GetName()];
       if (!attrSetData.fSink) {
          assert(!attrSetData.fDstModel);
-         attrSetData.fDstModel = srcModel->Clone();
-         attrSetData.fSink = mergeData.fDestination.CloneAsHidden(attrSetDesc.GetName(), {});
+         RNTupleDescriptor::RCreateModelOptions cmOpts;
+         cmOpts.SetCreateBare(true);
+         attrSetData.fDstModel = attrSource->GetSharedDescriptorGuard()->CreateModel(cmOpts);
+         auto sinkOpts = RNTupleWriteOptions();
+         sinkOpts.SetCompression(mergeData.fMergeOpts.fCompressionSettings.value());
+         attrSetData.fSink = mergeData.fDestination.CloneAsHidden(attrSetDesc.GetName(), sinkOpts);
          attrSetData.fSink->Init(*attrSetData.fDstModel);
          attrSetData.fDstEntry = attrSetData.fDstModel->CreateEntry();
-
-         // TODO: call user defined Begin function
+         attrSetData.fActions = std::make_unique<RAttrSlowMergeActions>();
       }
 
+      // Validate the attribute schema. We only compare _userData subfields since the others are fixed.
+      // (TODO: check and validate the attr set version and make sure that is the case)
       auto attrSrcDescGuard = attrSource->GetSharedDescriptorGuard();
       const auto &attrSrcDesc = attrSrcDescGuard.GetRef();
-
-      // Validate the attribute schema
-      // TODO: late model extend for ExtraSrcFields
-      // (ExtraDstFields are handled by simply default constructing them)
-      const auto &attrSink = attrSetData.fSink;
-      const auto &attrDstDesc = attrSink->GetDescriptor();
-      // auto cmpRes = CompareDescriptorStructure(attrDstDesc, attrSrcDesc);
-      // if (!cmpRes) {
-      //    return R__FAIL("Attribute set '" + attrDstDesc.GetName() +
-      //                   "' is incompatible with previously-seen attribute set(s) with the same name.");
-      // }
-      // auto cmp = cmpRes.Unwrap();
-      // if (!cmp.fExtraDstFields.empty() || !cmp.fExtraSrcFields.empty()) {
-      //    return R__FAIL(
-      //       "attribute set '" + attrDstDesc.GetName() +
-      //       "' don't have exactly the same schema as previously-seen attribute set(s). This is currently
-      //       unsupported.");
-      // }
-      using namespace ROOT::Experimental::Internal::RNTupleAttributes;
+      const auto &attrDstDesc = attrSetData.fSink->GetDescriptor();
 
       RDescriptorsComparison cmp;
-      // only compare _userData subfields
-      const auto userDataDstId = attrDstDesc.FindFieldId(kMetaFieldNames[kMetaFieldIndex_UserData]);
+      const auto userDataFieldName = std::string(kMetaFieldNames[kMetaFieldIndex_UserData]);
+      const auto userDataDstId = attrDstDesc.FindFieldId(userDataFieldName);
       for (const auto &dstField : attrDstDesc.GetFieldIterable(userDataDstId)) {
-         const auto srcFieldId = attrSrcDesc.FindFieldId(std::string(kMetaFieldNames[kMetaFieldIndex_UserData]) + "." + dstField.GetFieldName());
+         const auto srcFieldId = attrSrcDesc.FindFieldId(userDataFieldName + "." + dstField.GetFieldName());
          if (srcFieldId != ROOT::kInvalidDescriptorId) {
             const auto &srcField = attrSrcDesc.GetFieldDescriptor(srcFieldId);
             cmp.fCommonFields.push_back({srcField, dstField});
@@ -1434,14 +1408,15 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
             cmp.fExtraDstFields.emplace_back(&dstField);
          }
       }
-      const auto userDataSrcId = attrSrcDesc.FindFieldId(kMetaFieldNames[kMetaFieldIndex_UserData]);
+      const auto userDataSrcId = attrSrcDesc.FindFieldId(userDataFieldName);
       for (const auto &srcField : attrSrcDesc.GetFieldIterable(userDataSrcId)) {
-         const auto dstFieldId = attrDstDesc.FindFieldId(std::string(kMetaFieldNames[kMetaFieldIndex_UserData]) + "." +srcField.GetFieldName());
+         const auto dstFieldId = attrDstDesc.FindFieldId(userDataFieldName + "." +  srcField.GetFieldName());
          if (dstFieldId == ROOT::kInvalidDescriptorId) {
             cmp.fExtraSrcFields.push_back(&srcField);
          }
       }
 
+      // Make sure that types of common fields match
       for (const auto &[srcField, dstField] : cmp.fCommonFields) {
          const auto srcType = attrSrcDesc.GetTypeNameForComparison(*srcField);
          const auto dstType = attrDstDesc.GetTypeNameForComparison(*dstField);
@@ -1452,47 +1427,46 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
                ", new: " + dstType + "). Attribute sets cannot be merged.");
          }
       }
-      // XXX: doable? requires extending subfields...
-      // if (!cmp.fExtraSrcFields.empty()) {
-      //    ROOT::Internal::RNTupleModelChangeset changeset{*attrSetData.fDstModel};
-      //    changeset.AddField(std::unique_ptr<ROOT::RFieldBase> field)
-      // }
 
-      // COPYPASTED FROM ExtendDestinationModel
-      if (!cmp.fExtraSrcFields.empty()) {
-         auto &dstModel = *attrSetData.fDstModel;
-         const auto &newFields = cmp.fExtraSrcFields;
-         dstModel.Unfreeze();
-         ROOT::Internal::RNTupleModelChangeset changeset{dstModel};
-         changeset.fAddedFields.reserve(newFields.size());
-         for (const auto *fieldDesc : newFields) {
-            // attributes don't allow projected fields
-            R__ASSERT(!fieldDesc->IsProjectedField());
+      // TODO: here we need to late model extend if necessary
 
-            auto field = fieldDesc->CreateField(attrSrcDesc);
-            changeset.AddField(std::move(field), kMetaFieldNames[kMetaFieldIndex_UserData]);
+      // reset the _userData record field, to make sure any subfield that's missing from the current source
+      // is default-initialized (rather than keeping its previous value).
+      attrSetData.fDstEntry->EmplaceNewValue(userDataFieldName);
+
+      // Impose the same model on the source. This will ensure we properly schema-evolve the _userData field if
+      // necessary (e.g. if this source has fewer/reordered fields than the destination)
+      auto srcModel = attrSetData.fDstModel->Clone();
+      { // TODO: make this code common with RNTupleReader::ConnectModel()
+         auto &fieldZero = ROOT::Internal::GetFieldZeroOfModel(*srcModel);
+         ROOT::Internal::SetAllowFieldSubstitutions(fieldZero, true);
+         // We must not use the descriptor guard to prevent recursive locking in field.ConnectPageSource
+         ROOT::DescriptorId_t fieldZeroId = attrSource->GetSharedDescriptorGuard()->GetFieldZeroId();
+         fieldZero.SetOnDiskId(fieldZeroId);
+         const auto resetColumnRepresentatives = [] (auto *field, const auto &resetColumnRepresentatives) -> void {
+            field->SetColumnRepresentatives({});
+            for (auto *f : field->GetMutableSubfields()) {
+               resetColumnRepresentatives(f, resetColumnRepresentatives);
+            }
+         };
+         // Iterate only over fieldZero's direct subfields; their descendants are recursively handled in
+         // RFieldBase::ConnectPageSource
+         for (auto *field : fieldZero.GetMutableSubfields()) {
+            // This needs to be done otherwise ConnectPageSource fails in case we are changing the column reprs
+            // due to AutoAdjustColumnRepresentatives
+            resetColumnRepresentatives(field, resetColumnRepresentatives);
+
+            if (field->GetOnDiskId() == ROOT::kInvalidDescriptorId) {
+               field->SetOnDiskId(
+                  attrSource->GetSharedDescriptorGuard()->FindFieldId(field->GetFieldName(), fieldZeroId));
+            }
+            ROOT::Internal::CallConnectPageSourceOnField(*field, *attrSource);
          }
-         dstModel.Freeze();
-         try {
-            attrSetData.fSink->UpdateSchema(changeset, attrSetData.fContext.fDestinationEntryIndex);
-         } catch (const ROOT::RException &ex) {
-            return R__FAIL(ex.what());
-         }
+         ROOT::Internal::SetAllowFieldSubstitutions(fieldZero, false);
       }
 
-      struct AttrSlowMergeActions : public RNTupleSlowMergeActions {
-         ROOT::NTupleSize_t fAttrEntryStartOffset;
-
-         AttrSlowMergeActions(ROOT::NTupleSize_t offset) : fAttrEntryStartOffset(offset) {}
-
-         ENTupleSlowMergeResult OnFill(REntry &entry, const RNTupleSlowMergeContext &) final
-         {
-            *entry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]) += fAttrEntryStartOffset;
-            return ENTupleSlowMergeResult::kEmit;
-         }
-      } mergeActions{attrEntryStartOffset};
-
-      DoSlowMerge(*attrSource, *srcModel, cmp.fExtraDstFields, attrSetData, mergeActions);
+      static_cast<RAttrSlowMergeActions &>(*attrSetData.fActions).fAttrEntryStartOffset = attrEntryStartOffset;
+      DoSlowMerge(*attrSource, *srcModel, attrSetData);
    }
 
    return ROOT::RResult<void>::Success();
@@ -1705,11 +1679,11 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
    // Commit the output
    for (auto &[name, outAttrSet] : outAttrSets) {
 
-      /*
+      // Call BeforeCommit action
       auto &context = outAttrSet.fContext;
       auto &dstEntry = *outAttrSet.fDstEntry;
       while (true) {
-         auto res = userFns.BeforeCommit(dstEntry, context);
+         auto res = outAttrSet.fActions->BeforeCommit(dstEntry, context);
          if (res == ENTupleSlowMergeResult::kDrop)
             break;
          context.fDestinationEntryIndex += 1;
@@ -1717,7 +1691,6 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
          if (res == ENTupleSlowMergeResult::kEmit)
             break;
       }
-      */
 
       if (outAttrSet.fContext.fDestinationEntryIndex > 0) {
          for (auto &field : ROOT::Internal::GetFieldZeroOfModel(*outAttrSet.fDstModel)) {

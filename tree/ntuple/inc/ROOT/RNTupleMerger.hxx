@@ -134,15 +134,35 @@ enum class ENTupleSlowMergeResult {
    kEmitMulti,
 };
 
+// clang-format off
+/**
+ * \class ROOT::Experimental::Internal::RNTupleSlowMergeActions
+ * \ingroup NTuple
+ * \brief Container for callbacks that are invoked during the "slow merge" process.
+ *        This allows customizing how the merging happens entry-by-entry, enabling things like dropping individual
+ *        entries from the destination RNTuple, modifying their values on the fly or creating new entries artificially.
+ */
+// clang-format on
 class RNTupleSlowMergeActions {
+protected:
+   RNTupleSlowMergeActions() = default;
+
 public:
    virtual ~RNTupleSlowMergeActions() = default;
 
+   RNTupleSlowMergeActions(const RNTupleSlowMergeActions &) = delete;
+   RNTupleSlowMergeActions &operator=(const RNTupleSlowMergeActions &) = delete;
+   RNTupleSlowMergeActions(RNTupleSlowMergeActions &&) = default;
+   RNTupleSlowMergeActions &operator=(RNTupleSlowMergeActions &&) = default;
+
+   /// Invoked every time an entry is merged from a source RNTuple to the destination RNTuple.
    virtual ENTupleSlowMergeResult OnFill(ROOT::REntry &, const RNTupleSlowMergeContext &)
    {
       return ENTupleSlowMergeResult::kEmit;
    }
 
+   /// Invoked at the end of the merge process, right before committing the dataset.
+   /// This allows appending more entries at the end of the merge.
    virtual ENTupleSlowMergeResult BeforeCommit(ROOT::REntry &, const RNTupleSlowMergeContext &)
    {
       return ENTupleSlowMergeResult::kDrop;
@@ -168,8 +188,7 @@ class RNTupleMerger final {
    std::unique_ptr<ROOT::RNTupleModel> fModel;
 
    static void DoSlowMerge(ROOT::Internal::RPageSource &source, ROOT::RNTupleModel &srcModel,
-                           std::span<const RFieldDescriptor *const> extraDstFields,
-                           RNTupleSlowMergeData &mergeData, RNTupleSlowMergeActions &userActions);
+                           RNTupleSlowMergeData &mergeData);
 
    [[nodiscard]]
    ROOT::RResult<void>

@@ -1256,35 +1256,6 @@ void ROOT::Internal::RPagePersistentSink::InitImpl(ROOT::RNTupleModel &model)
 std::unique_ptr<ROOT::RNTupleModel>
 ROOT::Internal::RPagePersistentSink::InitFromDescriptor(const ROOT::RNTupleDescriptor &srcDescriptor, bool copyClusters)
 {
-#define NEWTHING 0
-#if NEWTHING
-   auto model = RNTupleModel::Create();
-
-   auto &fieldZero = ROOT::Internal::GetFieldZeroOfModel(*model);
-   auto zeroId = srcDescriptor.GetFieldZeroId();
-   fDescriptorBuilder.AddField(RFieldDescriptorBuilder::FromField(fieldZero).FieldId(zeroId).MakeDescriptor().Unwrap());
-   fieldZero.SetOnDiskId(zeroId);
-   auto &projectedFields = ROOT::Internal::GetProjectedFieldsOfModel(*model);
-   projectedFields.GetFieldZero().SetOnDiskId(zeroId);
-
-   fDescriptorBuilder.SetVersionForWriting();
-   const auto &descriptor = fDescriptorBuilder.GetDescriptor();
-
-   ROOT::Internal::RNTupleModelChangeset initialChangeset{*model};
-   for (const auto &fdesc : srcDescriptor.GetFieldIterable(zeroId)) {
-      auto field = fdesc.CreateField(srcDescriptor);
-      if (fdesc.IsProjectedField()) {
-         const auto &projSrcDesc = srcDescriptor.GetFieldDescriptor(fdesc.GetProjectionSourceId());
-         initialChangeset.AddProjectedField(std::move(field),
-                                            [dstName = projSrcDesc.GetFieldName()](const auto &) { return dstName; });
-      } else {
-         initialChangeset.AddField(std::move(field));
-      }
-   }
-   UpdateSchema(initialChangeset, 0U);
-
-#else
-
    // Create new descriptor
    fDescriptorBuilder.SetSchemaFromExisting(srcDescriptor);
    // This is needed to be able to use GetTypeNameForComparison()
@@ -1309,8 +1280,6 @@ ROOT::Internal::RPagePersistentSink::InitFromDescriptor(const ROOT::RNTupleDescr
       fOpenPageRanges.emplace_back(std::move(pageRange));
    }
 
-#endif
-
    if (copyClusters) {
       // Clone and add all cluster descriptors
       R__ASSERT(srcDescriptor.GetNClusters() == srcDescriptor.GetNActiveClusters());
@@ -1330,14 +1299,13 @@ ROOT::Internal::RPagePersistentSink::InitFromDescriptor(const ROOT::RNTupleDescr
       }
    }
 
-#if !NEWTHING
    // Create model
    auto modelOpts = ROOT::RNTupleDescriptor::RCreateModelOptions();
    modelOpts.SetReconstructProjections(true);
    // We want to emulate unknown types to allow merging RNTuples containing types that we lack dictionaries for.
    modelOpts.SetEmulateUnknownTypes(true);
    auto model = descriptor.CreateModel(modelOpts);
-#endif
+
    if (!copyClusters) {
       auto &projectedFields = ROOT::Internal::GetProjectedFieldsOfModel(*model);
       projectedFields.GetFieldZero().SetOnDiskId(model->GetConstFieldZero().GetOnDiskId());
