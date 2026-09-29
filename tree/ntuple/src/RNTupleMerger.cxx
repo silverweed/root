@@ -553,11 +553,19 @@ static void MatchColumnRepresentations(const ROOT::RNTupleDescriptor &srcDesc, c
    }
 }
 
-static RDescriptorsComparison
-FillCommonAndExtraFields(const ROOT::RNTupleDescriptor &dst, const ROOT::RNTupleDescriptor &src)
+/// Compares the top level fields of `dst` and `src` and determines whether they can be merged or not.
+/// In addition, returns the differences between `dst` and `src`'s structures
+static ROOT::RResult<RDescriptorsComparison>
+CompareDescriptorStructure(const ROOT::RNTupleDescriptor &dst, const ROOT::RNTupleDescriptor &src)
 {
-   RDescriptorsComparison res;
+   // Cases:
+   // 1. dst == src
+   // 2. dst has fields that src hasn't
+   // 3. src has fields that dst hasn't
+   // 4. dst and src have fields that differ (compatible or incompatible)
 
+   RDescriptorsComparison res;
+   std::vector<std::string> errors;
    for (const auto &dstField : dst.GetTopLevelFields()) {
       const auto srcFieldId = src.FindFieldId(dstField.GetFieldName());
       if (srcFieldId != ROOT::kInvalidDescriptorId) {
@@ -573,23 +581,6 @@ FillCommonAndExtraFields(const ROOT::RNTupleDescriptor &dst, const ROOT::RNTuple
          res.fExtraSrcFields.push_back(&srcField);
       }
    }
-
-   return res;
-}
-
-/// Compares the top level fields of `dst` and `src` and determines whether they can be merged or not.
-/// In addition, returns the differences between `dst` and `src`'s structures
-static ROOT::RResult<RDescriptorsComparison>
-CompareDescriptorStructure(const ROOT::RNTupleDescriptor &dst, const ROOT::RNTupleDescriptor &src)
-{
-   // Cases:
-   // 1. dst == src
-   // 2. dst has fields that src hasn't
-   // 3. src has fields that dst hasn't
-   // 4. dst and src have fields that differ (compatible or incompatible)
-
-   std::vector<std::string> errors;
-   RDescriptorsComparison res = FillCommonAndExtraFields(dst, src);
 
    // Check compatibility of common fields
    auto fieldsToCheck = res.fCommonFields;
@@ -1348,8 +1339,8 @@ void ROOT::Experimental::Internal::RNTupleMerger::DoSlowMerge(ROOT::Internal::RP
       srcEntry->BindValue(srcFieldDesc.GetFieldName(), dstEntry->GetPtr<void>(srcFieldDesc.GetFieldName()));
    }
    // Default-initialize extra dst fields
-   for (const auto *field : extraDstFields)
-      dstEntry->EmplaceNewValue(field->GetFieldName());
+   // for (const auto *field : extraDstFields)
+   //    dstEntry->EmplaceNewValue("_userData." + field->GetFieldName()); // TODO: replace with kMetaName..
 
    for (auto idx = 0u; idx < srcDesc.GetNEntries(); ++idx) {
       srcEntry->Read(idx);
@@ -1375,7 +1366,9 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
       auto attrSource = source.OpenWithDifferentAnchor(attrLink);
       attrSource->Attach();
 
-      auto srcModel = attrSource->GetSharedDescriptorGuard()->CreateModel();
+      RNTupleDescriptor::RCreateModelOptions cmOpts;
+      cmOpts.SetCreateBare(true);
+      auto srcModel = attrSource->GetSharedDescriptorGuard()->CreateModel(cmOpts);
       {
          auto &fieldZero = ROOT::Internal::GetFieldZeroOfModel(*srcModel);
          ROOT::Internal::SetAllowFieldSubstitutions(fieldZero, true);
@@ -1427,7 +1420,28 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
       //       "' don't have exactly the same schema as previously-seen attribute set(s). This is currently
       //       unsupported.");
       // }
-      const RDescriptorsComparison cmp = FillCommonAndExtraFields(attrDstDesc, attrSrcDesc);
+      using namespace ROOT::Experimental::Internal::RNTupleAttributes;
+
+      RDescriptorsComparison cmp;
+      // only compare _userData subfields
+      const auto userDataDstId = attrDstDesc.FindFieldId(kMetaFieldNames[kMetaFieldIndex_UserData]);
+      for (const auto &dstField : attrDstDesc.GetFieldIterable(userDataDstId)) {
+         const auto srcFieldId = attrSrcDesc.FindFieldId(std::string(kMetaFieldNames[kMetaFieldIndex_UserData]) + "." + dstField.GetFieldName());
+         if (srcFieldId != ROOT::kInvalidDescriptorId) {
+            const auto &srcField = attrSrcDesc.GetFieldDescriptor(srcFieldId);
+            cmp.fCommonFields.push_back({srcField, dstField});
+         } else {
+            cmp.fExtraDstFields.emplace_back(&dstField);
+         }
+      }
+      const auto userDataSrcId = attrSrcDesc.FindFieldId(kMetaFieldNames[kMetaFieldIndex_UserData]);
+      for (const auto &srcField : attrSrcDesc.GetFieldIterable(userDataSrcId)) {
+         const auto dstFieldId = attrDstDesc.FindFieldId(std::string(kMetaFieldNames[kMetaFieldIndex_UserData]) + "." +srcField.GetFieldName());
+         if (dstFieldId == ROOT::kInvalidDescriptorId) {
+            cmp.fExtraSrcFields.push_back(&srcField);
+         }
+      }
+
       for (const auto &[srcField, dstField] : cmp.fCommonFields) {
          const auto srcType = attrSrcDesc.GetTypeNameForComparison(*srcField);
          const auto dstType = attrDstDesc.GetTypeNameForComparison(*dstField);
@@ -1438,10 +1452,33 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
                ", new: " + dstType + "). Attribute sets cannot be merged.");
          }
       }
+      // XXX: doable? requires extending subfields...
       // if (!cmp.fExtraSrcFields.empty()) {
       //    ROOT::Internal::RNTupleModelChangeset changeset{*attrSetData.fDstModel};
       //    changeset.AddField(std::unique_ptr<ROOT::RFieldBase> field)
       // }
+
+      // COPYPASTED FROM ExtendDestinationModel
+      if (!cmp.fExtraSrcFields.empty()) {
+         auto &dstModel = *attrSetData.fDstModel;
+         const auto &newFields = cmp.fExtraSrcFields;
+         dstModel.Unfreeze();
+         ROOT::Internal::RNTupleModelChangeset changeset{dstModel};
+         changeset.fAddedFields.reserve(newFields.size());
+         for (const auto *fieldDesc : newFields) {
+            // attributes don't allow projected fields
+            R__ASSERT(!fieldDesc->IsProjectedField());
+
+            auto field = fieldDesc->CreateField(attrSrcDesc);
+            changeset.AddField(std::move(field), kMetaFieldNames[kMetaFieldIndex_UserData]);
+         }
+         dstModel.Freeze();
+         try {
+            attrSetData.fSink->UpdateSchema(changeset, attrSetData.fContext.fDestinationEntryIndex);
+         } catch (const ROOT::RException &ex) {
+            return R__FAIL(ex.what());
+         }
+      }
 
       struct AttrSlowMergeActions : public RNTupleSlowMergeActions {
          ROOT::NTupleSize_t fAttrEntryStartOffset;
@@ -1450,8 +1487,6 @@ ROOT::RResult<void> ROOT::Experimental::Internal::RNTupleMerger::MergeSourceAttr
 
          ENTupleSlowMergeResult OnFill(REntry &entry, const RNTupleSlowMergeContext &) final
          {
-            using namespace ROOT::Experimental::Internal::RNTupleAttributes;
-
             *entry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]) += fAttrEntryStartOffset;
             return ENTupleSlowMergeResult::kEmit;
          }
