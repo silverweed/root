@@ -140,6 +140,12 @@ public:
       return ENTupleSlowMergeResult::kEmit;
    }
 
+   // Invoked at the end of each source's merging process.
+   virtual ENTupleSlowMergeResult OnSourceEnd(ROOT::REntry &, const RNTupleSlowMergeContext &)
+   {
+      return ENTupleSlowMergeResult::kDrop;
+   }
+
    /// Invoked at the end of the merge process, right before committing the dataset.
    /// This allows appending more entries at the end of the merge.
    virtual ENTupleSlowMergeResult BeforeCommit(ROOT::REntry &, const RNTupleSlowMergeContext &)

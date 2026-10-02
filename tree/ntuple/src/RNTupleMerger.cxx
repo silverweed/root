@@ -27,6 +27,7 @@
 #include <ROOT/RNTupleSerialize.hxx>
 #include <ROOT/RNTupleZip.hxx>
 #include <ROOT/RColumnElementBase.hxx>
+#include <ROOT/RNTupleAttrUtils.hxx>
 #include <TROOT.h>
 #include <TFileMergeInfo.h>
 #include <TFile.h>
@@ -715,7 +716,7 @@ ExtendDestinationModel(RDescriptorsComparison &descCmp, ROOT::RNTupleModel &dstM
          return acc + (acc.length() ? ", " : "") + '`' + field->GetFieldName() + '`';
       });
       R__LOG_INFO(NTupleMergeLog()) << msg << ": adding " << (newFields.size() > 1 ? "them" : "it")
-                                    << " to the destination model (entry #" << destination.GetNEntries() << ").";
+                                    << " to the destination model (entry #" << nEntries << ").";
    }
 
    changeset.fAddedFields.reserve(newFields.size());
@@ -880,7 +881,7 @@ namespace {
 class RNTupleMergeStrategy {
 protected:
    // Fixed during the whole merging. Note that these references are owned by the RNTupleMerger and share its lifetime.
-   std::unique_ptr<ROOT::RNTupleModel> &fDstModel;
+   std::unique_ptr<ROOT::RNTupleModel> fDstModel;
    ROOT::Internal::RPagePersistentSink &fDestination;
    const ROOT::RNTupleDescriptor &fDstDescriptor;
    RNTupleMergeOptions fMergeOpts;
@@ -889,13 +890,17 @@ protected:
    const ROOT::RNTupleDescriptor *fSrcDescriptor = nullptr;
 
 public:
-   RNTupleMergeStrategy(std::unique_ptr<RNTupleModel> &dstModel, ROOT::Internal::RPagePersistentSink &dst,
+   RNTupleMergeStrategy(std::unique_ptr<RNTupleModel> dstModel, ROOT::Internal::RPagePersistentSink &dst,
                         const RNTupleMergeOptions &mergeOpts)
-      : fDstModel(dstModel), fDestination(dst), fDstDescriptor(dst.GetDescriptor()), fMergeOpts(mergeOpts)
+      : fDstModel(std::move(dstModel)), fDestination(dst), fDstDescriptor(dst.GetDescriptor()), fMergeOpts(mergeOpts)
    {
    }
 
    virtual ~RNTupleMergeStrategy() = default;
+
+   // Returns the number of entries currently written to the destination.
+   // This is only accurate before or after a call to MergeSource(), not during it.
+   virtual ROOT::NTupleSize_t GetNDstEntries() const = 0;
 
    // Invoked as the first thing when we start processing a new source
    virtual void InitSource(RPageSource &source) = 0;
@@ -912,6 +917,30 @@ public:
 
    // Invoked at the end of the whole process, just before committing the dataset
    virtual void BeforeCommit() = 0;
+};
+
+struct RNTupleAttrSlowMergeActions final : public RNTupleSlowMergeActions {
+   ROOT::NTupleSize_t fAttrEntryStartOffset = 0;
+   const RNTupleMergeStrategy &fParentStrategy;
+
+   RNTupleAttrSlowMergeActions(const RNTupleMergeStrategy &parentStrategy, ROOT::NTupleSize_t initialStartOffset)
+      : fAttrEntryStartOffset(initialStartOffset), fParentStrategy(parentStrategy)
+   {
+   }
+
+   ENTupleSlowMergeResult OnFill(ROOT::REntry &entry, const RNTupleSlowMergeContext &) final
+   {
+      using namespace ROOT::Experimental::Internal::RNTupleAttributes;
+
+      *entry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]) += fAttrEntryStartOffset;
+      return ENTupleSlowMergeResult::kEmit;
+   }
+
+   ENTupleSlowMergeResult OnSourceEnd(ROOT::REntry &, const RNTupleSlowMergeContext &) final
+   {
+      fAttrEntryStartOffset = fParentStrategy.GetNDstEntries();
+      return ENTupleSlowMergeResult::kDrop;
+   }
 };
 
 // =========================================================================================
@@ -949,9 +978,9 @@ class RNTupleMergeStrategyDefault final : public RNTupleMergeStrategy {
                                                          std::span<const RColumnMergeInfo> extraDstColumns);
 
 public:
-   RNTupleMergeStrategyDefault(std::unique_ptr<RNTupleModel> &dstModel, ROOT::Internal::RPagePersistentSink &dst,
+   RNTupleMergeStrategyDefault(std::unique_ptr<RNTupleModel> dstModel, ROOT::Internal::RPagePersistentSink &dst,
                                const RNTupleMergeOptions &mergeOpts)
-      : RNTupleMergeStrategy(dstModel, dst, mergeOpts)
+      : RNTupleMergeStrategy(std::move(dstModel), dst, mergeOpts)
    {
 #ifdef R__USE_IMT
       if (ROOT::IsImplicitMTEnabled())
@@ -965,6 +994,12 @@ public:
             PrefillColumnMap(dst.GetDescriptor(), field, fColumnIdMap);
          }
       }
+   }
+
+   ROOT::NTupleSize_t GetNDstEntries() const final {
+      // Since with default merging we always commit clusters at source boundary, we can simply rely on
+      // the sink's internal counter.
+      return fDestination.GetNEntries();
    }
 
    void InitSource(RPageSource &source) final
@@ -987,7 +1022,7 @@ public:
    {
       // late model extension for all fExtraSrcFields in Union mode
       auto res = ::ExtendDestinationModel(descCmp, *fDstModel, fDestination, *fSrcDescriptor,
-                                          fDestination.GetNEntries(), fMergeOpts.fExtraVerbose,
+                                          GetNDstEntries(), fMergeOpts.fExtraVerbose,
                                           /*forSlowMerge=*/false);
       return res;
    }
@@ -1496,16 +1531,24 @@ namespace ROOT::Experimental::Internal {
 // This class must be in ROOT::Experimental::Internal because it befriends ROOT::REntry
 class RNTupleMergeStrategySlow final : public RNTupleMergeStrategy {
    std::unique_ptr<ROOT::REntry> fDstEntry;
-   std::unique_ptr<RNTupleSlowMergeActions> fActions = std::make_unique<RNTupleSlowMergeActions>();
+   std::unique_ptr<RNTupleSlowMergeActions> fActions;
    RNTupleSlowMergeContext fMergeContext;
 
 public:
-   RNTupleMergeStrategySlow(std::unique_ptr<RNTupleModel> &dstModel, ROOT::Internal::RPagePersistentSink &dst,
-                            const RNTupleMergeOptions &mergeOpts)
-      : RNTupleMergeStrategy(dstModel, dst, mergeOpts)
+   RNTupleMergeStrategySlow(
+      std::unique_ptr<RNTupleModel> dstModel, ROOT::Internal::RPagePersistentSink &dst,
+      const RNTupleMergeOptions &mergeOpts,
+      std::unique_ptr<RNTupleSlowMergeActions> actions = std::make_unique<RNTupleSlowMergeActions>())
+      : RNTupleMergeStrategy(std::move(dstModel), dst, mergeOpts), fActions(std::move(actions))
    {
       // dstModel is non null iff we are doing an incremental merge. Currently we don't support it.
       assert(!dstModel);
+   }
+
+   ROOT::NTupleSize_t GetNDstEntries() const final {
+      // During slow merging clusters are not necessarily committed at source boundary, so we need to
+      // manually track this number.
+      return fMergeContext.fDestinationEntryIndex;
    }
 
    void InitSource(RPageSource &source) final
@@ -1670,6 +1713,16 @@ ROOT::RResult<void> RNTupleMergeStrategySlow::MergeSource(RPageSource &source, R
       }
    }
 
+   while (true) {
+      auto res = fActions->OnSourceEnd(*fDstEntry, fMergeContext);
+      if (res == ENTupleSlowMergeResult::kDrop)
+         break;
+      fMergeContext.fDestinationEntryIndex += 1;
+      fDstEntry->Append();
+      if (res == ENTupleSlowMergeResult::kEmit)
+         break;
+   }
+
    if (fMergeContext.fDestinationEntryIndex > 0) {
       for (auto &field : ROOT::Internal::GetFieldZeroOfModel(*fDstModel)) {
          ROOT::Internal::CallFlushColumnsOnField(field);
@@ -1738,10 +1791,26 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
       return R__FAIL(errMsg);                                                      \
    }
 
-   auto strat =
-      doSlowMerge
-         ? std::unique_ptr<RNTupleMergeStrategy>(new RNTupleMergeStrategySlow(fModel, *fDestination, mergeOpts))
-         : std::unique_ptr<RNTupleMergeStrategy>(new RNTupleMergeStrategyDefault(fModel, *fDestination, mergeOpts));
+   auto strat = doSlowMerge ? std::unique_ptr<RNTupleMergeStrategy>(
+                                 new RNTupleMergeStrategySlow(std::move(fModel), *fDestination, mergeOpts))
+                            : std::unique_ptr<RNTupleMergeStrategy>(
+                                 new RNTupleMergeStrategyDefault(std::move(fModel), *fDestination, mergeOpts));
+
+   struct RAttrSetMergeData {
+      std::unique_ptr<ROOT::Internal::RPagePersistentSink> fSink;
+      RNTupleMergeStrategySlow fStrategy;
+
+      RAttrSetMergeData(std::unique_ptr<ROOT::Internal::RPagePersistentSink> attrSink,
+                        const RNTupleMergeStrategy &parentStrategy, const RNTupleMergeOptions &mergeOpts,
+                        ROOT::NTupleSize_t initialStartOffset)
+         : fSink(std::move(attrSink)),
+           fStrategy(nullptr, *fSink, mergeOpts,
+                     std::make_unique<RNTupleAttrSlowMergeActions>(parentStrategy, initialStartOffset))
+      {
+      }
+   };
+   // Map { attrSetName => mergeData }
+   std::unordered_map<std::string, RAttrSetMergeData> attrSetsData;
 
    // Merge main loop
    for (RPageSource *source : sources) {
@@ -1800,14 +1869,63 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
          }
       }
 
+      const auto prevNEntries = strat->GetNDstEntries();
+
       auto res = strat->MergeSource(*source, descCmp);
       if (!res)
          return R__FORWARD_ERROR(res);
+
+      // Slow-merge attributes
+      for (const auto &attrSetDesc : source->GetSharedDescriptorGuard()->GetAttrSetIterable()) {
+         // Initialize output sink and strategy if it's the first time we encounter this attribute set name
+         if (attrSetsData.find(attrSetDesc.GetName()) == attrSetsData.end()) {
+            auto sinkOpts = RNTupleWriteOptions();
+            sinkOpts.SetCompression(mergeOpts.fCompressionSettings.value());
+            auto sink =
+               std::unique_ptr<ROOT::Internal::RPagePersistentSink>(static_cast<ROOT::Internal::RPagePersistentSink *>(
+                  fDestination->CloneAsHidden(attrSetDesc.GetName(), sinkOpts).release()));
+            attrSetsData.try_emplace(attrSetDesc.GetName(), std::move(sink), *strat, mergeOpts, prevNEntries);
+         }
+         auto &attrSetData = attrSetsData.find(attrSetDesc.GetName())->second;
+
+         const auto attrLink =
+            ROOT::Internal::RNTupleLink{attrSetDesc.GetAnchorLocator(), attrSetDesc.GetAnchorLength()};
+         auto attrSource = source->OpenWithDifferentAnchor(attrLink);
+         auto &strat = attrSetData.fStrategy;
+         strat.InitSource(*attrSource);
+
+         descCmpRes = strat.CompareSrcAndDstDescriptors();
+         if (!descCmpRes) {
+            SKIP_OR_ABORT(std::string("Source RNTuple has an incompatible schema with the destination:\n") +
+                          descCmpRes.GetError()->GetReport())
+         }
+         descCmp = descCmpRes.Unwrap();
+
+         if (!descCmp.fExtraSrcFields.empty()) {
+            auto res = strat.ExtendDestinationModel(descCmp);
+            if (!res)
+               return R__FORWARD_ERROR(res);
+         }
+
+         auto res = strat.MergeSource(*attrSource, descCmp);
+         if (!res)
+            return R__FORWARD_ERROR(res);
+      }
    } // end loop over sources
 
    // Commit the output
+   for (auto &[attrSetName, attrSetData] : attrSetsData) {
+      attrSetData.fStrategy.BeforeCommit();
+      if (attrSetData.fSink->GetNEntries() > 0) {
+         attrSetData.fSink->CommitClusterGroup();
+      }
+      auto anchorLink = attrSetData.fSink->CommitDataset();
+      fDestination->CommitAttributeSet(attrSetName, anchorLink);
+   }
+
    strat->BeforeCommit();
 
+   // Commit the output
    if (fDestination->GetNEntries() == 0)
       R__LOG_WARNING(NTupleMergeLog()) << "Output RNTuple '" << fDestination->GetNTupleName() << "' has no entries.";
    else
