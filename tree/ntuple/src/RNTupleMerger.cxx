@@ -1635,10 +1635,18 @@ ROOT::RResult<void> RNTupleMergeStrategySlow::MergeSource(RPageSource &source, R
    // Create and connect fields to source and sink and bind them together.
    // This causes a read on the src entry to populate the same memory used by the dst entry to write.
    for (const auto &[srcFieldDesc, _dstFieldDesc] : descCmp.fCommonFields) {
-      if (!srcFieldDesc->IsProjectedField())
+      if (!srcFieldDesc->IsProjectedField()) {
+         // Reset common fields to their default value. This makes sure that, if we have "common" untyped records
+         // that actually contain different subfields, those subfields are properly reset rather than preserving
+         // their previous value. This is particularly relevant for attributes since they can only differ under
+         // the _userData top-level field.
+         srcEntry->EmplaceNewValue(srcFieldDesc->GetFieldName());
+         fDstEntry->EmplaceNewValue(srcFieldDesc->GetFieldName());
+
          srcEntry->BindValue(srcFieldDesc->GetFieldName(), fDstEntry->GetPtr<void>(srcFieldDesc->GetFieldName()));
+      }
    }
-   // reset the extraDstfields, to make sure any subfield that's missing from the current source
+   // Reset the extraDstfields, to make sure any subfield that's missing from the current source
    // is default-initialized (rather than keeping its previous value).
    for (const auto *field : descCmp.fExtraDstFields) {
       if (!field->IsProjectedField()) {
