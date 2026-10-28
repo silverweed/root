@@ -116,23 +116,23 @@ TEST(RNTupleMergeEmulated, MergeEmulatedSimple)
       fileGuard2.PreserveFile();
 
       ASSERT_TRUE(gInterpreter->Declare(R"(
-         struct Custom {
+         struct CustomMergeSimple {
             int fInt1 = 1;
             int fInt2 = 2;
-            ClassDefNV(Custom, 2);
+            ClassDefNV(CustomMergeSimple, 2);
          };
       )"));
 
       auto model = RNTupleModel::Create();
-      model->AddField(RFieldBase::Create("f", "Custom").Unwrap());
+      model->AddField(RFieldBase::Create("f", "CustomMergeSimple").Unwrap());
 
       auto writer = RNTupleWriter::Recreate(model->Clone(), "ntuple", fileGuard1.GetPath());
       auto writer2 = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard2.GetPath());
 
       void *ptr = writer->GetModel().GetDefaultEntry().GetPtr<void>("f").get();
       void *ptr2 = writer2->GetModel().GetDefaultEntry().GetPtr<void>("f").get();
-      DeclarePointer("Custom", "ptr", ptr);
-      DeclarePointer("Custom", "ptr2", ptr2);
+      DeclarePointer("CustomMergeSimple", "ptr", ptr);
+      DeclarePointer("CustomMergeSimple", "ptr2", ptr2);
 
       ProcessLine("ptr->fInt1 = 11;");
       ProcessLine("ptr->fInt2 = 22;");
@@ -189,9 +189,9 @@ TEST(RNTupleMergeEmulated, MergeLateEmulated)
       fileGuard2.PreserveFile();
 
       ASSERT_TRUE(gInterpreter->Declare(R"(
-         struct Custom {
+         struct CustomMergeLate {
             int fInt1 = 1;
-            ClassDefNV(Custom, 2);
+            ClassDefNV(CustomMergeLate, 2);
          };
       )"));
 
@@ -203,11 +203,11 @@ TEST(RNTupleMergeEmulated, MergeLateEmulated)
       }
 
       auto model = RNTupleModel::Create();
-      model->AddField(RFieldBase::Create("f", "Custom").Unwrap());
+      model->AddField(RFieldBase::Create("f", "CustomMergeLate").Unwrap());
       auto writer2 = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard2.GetPath());
 
       void *ptr2 = writer2->GetModel().GetDefaultEntry().GetPtr<void>("f").get();
-      DeclarePointer("Custom", "ptr2", ptr2);
+      DeclarePointer("CustomMergeLate", "ptr2", ptr2);
 
       ProcessLine("ptr2->fInt1 = 11;");
       writer2->Fill();
@@ -241,9 +241,9 @@ TEST(RNTupleMergeEmulated, MergeLateEmulatedVector)
       fileGuard2.PreserveFile();
 
       ASSERT_TRUE(gInterpreter->Declare(R"(
-         struct Custom {
+         struct CustomMergeVec {
             int fInt1 = 1;
-            ClassDefNV(Custom, 2);
+            ClassDefNV(CustomMergeVec, 2);
          };
       )"));
 
@@ -255,17 +255,17 @@ TEST(RNTupleMergeEmulated, MergeLateEmulatedVector)
       }
 
       auto model = RNTupleModel::Create();
-      model->AddField(RFieldBase::Create("f", "std::vector<Custom>").Unwrap());
+      model->AddField(RFieldBase::Create("f", "std::vector<CustomMergeVec>").Unwrap());
       auto writer2 = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard2.GetPath());
 
       void *ptr = writer2->GetModel().GetDefaultEntry().GetPtr<void>("f").get();
       ASSERT_NE(ptr, nullptr);
-      DeclarePointer("std::vector<Custom>", "ptr", ptr);
+      DeclarePointer("std::vector<CustomMergeVec>", "ptr", ptr);
 
-      ProcessLine("ptr->push_back(Custom{11});");
+      ProcessLine("ptr->push_back(CustomMergeVec{11});");
       writer2->Fill();
 
-      ProcessLine("ptr->push_back(Custom{22});");
+      ProcessLine("ptr->push_back(CustomMergeVec{22});");
       writer2->Fill();
 
       writer2.reset();
@@ -294,9 +294,9 @@ TEST(RNTupleMergeEmulated, MergeLateEmulatedMap)
       fileGuard2.PreserveFile();
 
       ASSERT_TRUE(gInterpreter->Declare(R"(
-         struct Custom {
+         struct CustomMergeMap {
             int fInt1 = 1;
-            ClassDefNV(Custom, 2);
+            ClassDefNV(CustomMergeMap, 2);
          };
       )"));
 
@@ -308,18 +308,18 @@ TEST(RNTupleMergeEmulated, MergeLateEmulatedMap)
       }
 
       auto model = RNTupleModel::Create();
-      model->AddField(RFieldBase::Create("f", "std::map<std::string, Custom>").Unwrap());
+      model->AddField(RFieldBase::Create("f", "std::map<std::string, CustomMergeMap>").Unwrap());
       auto writer2 = RNTupleWriter::Recreate(std::move(model), "ntuple", fileGuard2.GetPath());
 
       void *ptr = writer2->GetModel().GetDefaultEntry().GetPtr<void>("f").get();
       ASSERT_NE(ptr, nullptr);
-      DeclarePointer("std::map<std::string, Custom>", "ptr", ptr);
+      DeclarePointer("std::map<std::string, CustomMergeMap>", "ptr", ptr);
 
       ProcessLine("R__ASSERT(ptr)");
-      ProcessLine("(*ptr)[\"myCustom1\"] = Custom{11};");
+      ProcessLine("(*ptr)[\"myCustomMergeMap1\"] = CustomMergeMap{11};");
       writer2->Fill();
 
-      ProcessLine("(*ptr)[\"myCustom2\"] = Custom{22};");
+      ProcessLine("(*ptr)[\"myCustomMergeMap2\"] = CustomMergeMap{22};");
       writer2->Fill();
 
       writer2.reset();
