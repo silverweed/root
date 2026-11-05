@@ -1,5 +1,6 @@
 #include "ntuple_test.hxx"
 #include "ntuple_fork.hxx"
+#include <TSystem.h>
 
 static void DoMerge(std::initializer_list<std::reference_wrapper<const FileRaii>> inputPaths, const FileRaii &outPath,
                     ENTupleMergingMode mergeMode = {})
@@ -270,11 +271,13 @@ TEST(RNTupleMergeEmulated, MergeLateEmulatedVector)
 
       writer2.reset();
 
+      EXPECT_TRUE(TClass::GetClass("CustomMergeVec")->IsLoaded());
       DoMerge({fileGuard1, fileGuard2}, fileGuardOut, ENTupleMergingMode::kUnion);
    });
 
    // Gather the input sources
    DoMerge({fileGuard1, fileGuard2}, fileGuardOut2, ENTupleMergingMode::kUnion);
+   EXPECT_FALSE(TClass::GetClass("CustomMergeVec")->IsLoaded());
    CompareOnDiskInfo(fileGuardOut, fileGuardOut2);
 }
 
@@ -293,12 +296,8 @@ TEST(RNTupleMergeEmulated, MergeLateEmulatedMap)
       fileGuard1.PreserveFile();
       fileGuard2.PreserveFile();
 
-      ASSERT_TRUE(gInterpreter->Declare(R"(
-         struct CustomMergeMap {
-            int fInt1 = 1;
-            ClassDefNV(CustomMergeMap, 2);
-         };
-      )"));
+      // Load CustomMergeMap and its dictionary
+      gSystem->Load("libCustomStruct");
 
       {
          auto writer = RNTupleWriter::Recreate(ROOT::RNTupleModel::Create(), "ntuple", fileGuard1.GetPath());
@@ -324,10 +323,13 @@ TEST(RNTupleMergeEmulated, MergeLateEmulatedMap)
 
       writer2.reset();
 
+      EXPECT_TRUE(TClass::GetClass("CustomMergeMap")->IsLoaded());
       DoMerge({fileGuard1, fileGuard2}, fileGuardOut, ENTupleMergingMode::kUnion);
    });
 
    // Gather the input sources
+   gInterpreter->SetClassAutoLoading(false);
    DoMerge({fileGuard1, fileGuard2}, fileGuardOut2, ENTupleMergingMode::kUnion);
+   EXPECT_FALSE(TClass::GetClass("CustomMergeMap")->IsLoaded());
    CompareOnDiskInfo(fileGuardOut, fileGuardOut2);
 }
