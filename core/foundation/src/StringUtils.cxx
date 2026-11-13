@@ -11,6 +11,7 @@
  *************************************************************************/
 
 #include "ROOT/StringUtils.hxx"
+#include <algorithm>
 #include <sstream>
 #include <cmath>
 #include <ios>
@@ -106,6 +107,39 @@ std::string Round(double value, double error, unsigned int cutoff, std::string_v
    if (factored_out_exponent_base10 != 0)
       result << ")*1e" << factored_out_exponent_base10;
    return result.str();
+}
+
+std::string WrapString(std::string_view string, std::size_t maxLen, std::size_t indent, std::size_t firstLineMaxLen)
+{
+   if (indent >= maxLen)
+      throw std::invalid_argument("indent cannot be larger than maxLen");
+
+   std::string result;
+   auto words = ROOT::Split(string, " \t\n");
+   if (words.empty())
+      return result;
+
+   // the first line gets wrapped to a length of `maxLen - indent`. The idea is that if you're indenting the wrapped
+   // string you might want to append it to a previously-existing one and you might be already in the middle of the
+   // line that you're appending to.
+   auto maxLenUsed = firstLineMaxLen > 0 ? firstLineMaxLen : maxLen - indent;
+   std::string curLine = words[0];
+   for (auto i = 1u; i < words.size(); ++i) {
+      const auto &word = words[i];
+      if (curLine.size() + word.size() + 1 > maxLenUsed) {
+         result += curLine + '\n';
+         curLine.clear();
+         curLine.resize(indent, ' ');
+         maxLenUsed = maxLen;
+      } else {
+         curLine += ' ';
+      }
+      curLine += word;
+   }
+
+   result += curLine;
+
+   return result;
 }
 
 } // namespace ROOT
