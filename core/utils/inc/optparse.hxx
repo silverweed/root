@@ -18,6 +18,8 @@
 #include <string_view>
 #include <vector>
 
+#include <ROOT/StringUtils.hxx>
+
 namespace ROOT {
 
 /// \brief Small utility to parse cmdline options.
@@ -97,6 +99,8 @@ namespace ROOT {
 /// "foo=bar"`). Note that this option only makes sense for flags with arguments.
 class RCmdLineOpts {
 public:
+   static constexpr std::size_t kDefaultHelpWidth = 100;
+
    enum class EFlagTreatment {
       /// Will result to kGrouped if you don't define any short flag longer than 1 character, otherwise kSimple.
       kDefault,
@@ -648,6 +652,111 @@ public:
    /// This will typically be empty, unless the RCmdLineOpts was created with `fIgnoreUnknownFlags == true`, in which
    /// case this will contain all skipped unknown flags.
    const std::vector<std::size_t> &GetUnprocessedArgsIndices() const { return fUnprocessedArgsIndices; }
+
+   /// Generates a short usage string for the program. `programName` should, in most cases, be equal to `argv[0]`.
+   /// The string does NOT contain the flags' description but only their name and whether they need an argument or not.
+   /// For flags with multiple aliases, only the first alias passed to AddFlag will be shown (so you should define your
+   /// aliases according to which flags you wish your user to see in this help).
+   /// If `maxLineWidth` is provided, it will be used as the tentative max width of the output (which may be larger than
+   /// that in case a line cannot be wrapped exactly due to e.g. too-long-named flags) and it will be overwritten with
+   /// the actual length of the longest line in the output string. If the value of `maxLineWidth` is 0, the default
+   /// line width will be used (but the variable will contain the actual line width when the function returns).
+   std::string MakeShortHelp(std::string_view programName, std::size_t *maxLineWidth = nullptr) const
+   {
+      std::string res;
+      std::string curLine = "usage: " + std::string(programName);
+      const std::size_t wrapBeginIdx = curLine.size() + 1;
+      const std::size_t lineWidthToUse = !maxLineWidth || *maxLineWidth == 0 ? kDefaultHelpWidth : *maxLineWidth;
+      std::size_t wrapEndIdx = std::max<std::size_t>(wrapBeginIdx + 10, lineWidthToUse);
+      auto expectedFlags = fExpectedFlags;
+      std::sort(expectedFlags.begin(), expectedFlags.end(),
+                [](const auto &a, const auto &b) { return a.fName < b.fName; });
+      for (int i = 0; i < (int)expectedFlags.size(); ++i) {
+         const auto &expected = expectedFlags[i];
+         // print only the first alias encountered for each flag
+         if (expected.fAlias >= 0)
+            continue;
+
+         std::string toAppend = " [" + expected.AsStr();
+         if (expected.fFlagType == EFlagType::kWithArg) {
+            auto arg = expected.fName;
+            std::transform(arg.begin(), arg.end(), arg.begin(), ::toupper);
+            if (expected.fOpts & kFlagPrefixArg)
+               toAppend += "<" + arg + ">";
+            else
+               toAppend += ' ' + arg;
+         } else if (expected.fShort && (expected.fOpts & kFlagAllowMultiple)) {
+            toAppend += "(" + expected.fName + "..)";
+         }
+         toAppend += ']';
+
+         if (curLine.size() + toAppend.size() > wrapEndIdx) {
+            res += curLine + '\n';
+            curLine.clear();
+            // NOTE: wrapBeginIdx - 1 because toAppend always starts with a space which we want to count
+            // as part of the wrapBegin.
+            curLine.resize(wrapBeginIdx - 1, ' ');
+            // If toAppend is already longer than the allowed line size, expand the line size to accomodate.
+            wrapEndIdx = std::max(toAppend.size() + wrapBeginIdx, wrapEndIdx);
+         }
+         curLine += toAppend;
+      }
+      res += curLine;
+      if (maxLineWidth)
+         *maxLineWidth = wrapEndIdx;
+
+      return res;
+   }
+
+   /// Generates a long usage help for the program.
+   /// The output string includes the output of MakeShortHelp followed by `description` and by the complete list of
+   /// flags in alphabetic order, each paired with its description.
+   /// See MakeShortHelp for the meaning of `maxLineWidth`.
+   std::string
+   MakeLongHelp(std::string_view programName, std::string_view description, std::size_t *maxLineWidth = nullptr) const
+   {
+      std::size_t wrapEndIdx = maxLineWidth ? *maxLineWidth : 0;
+      std::string res = MakeShortHelp(programName, &wrapEndIdx);
+      if (maxLineWidth)
+         *maxLineWidth = wrapEndIdx;
+
+      res += "\n\n";
+      res += ROOT::WrapString(description, wrapEndIdx) + "\n\n";
+
+      // Collect all aliases together
+      int firstColWidth = 0;
+      for (const auto &expected : fExpectedFlags)
+         firstColWidth = std::max<int>(firstColWidth, expected.AsStr().size());
+      firstColWidth += 3; // 2 spaces leading, 1 space trailing
+
+      const auto secondColWidth = std::max<int>(20, static_cast<int>(wrapEndIdx) - firstColWidth);
+
+      auto expectedFlags = fExpectedFlags;
+      std::sort(expectedFlags.begin(), expectedFlags.end(),
+                [](const auto &a, const auto &b) { return a.fName < b.fName; });
+      for (int i = 0; i < (int)expectedFlags.size(); ++i) {
+         const auto &expected = expectedFlags[i];
+         // print only the first alias encountered for each flag
+         if (expected.fAlias >= 0)
+            continue;
+
+         auto line = "  " + expected.AsStr();
+         for (std::size_t j = i + 1; j < expectedFlags.size(); ++j) {
+            const auto &alias = expectedFlags[j];
+            if (alias.fAlias == i)
+               line += ", " + alias.AsStr();
+         }
+         // fill the rest of the column with spaces
+         line.resize(firstColWidth, ' ');
+
+         // now do the second column
+         line += ROOT::WrapString(expected.fHelp, firstColWidth + secondColWidth, firstColWidth);
+
+         res += line + '\n';
+      }
+
+      return res;
+   }
 };
 
 } // namespace ROOT

@@ -92,3 +92,51 @@ TEST(StringUtils, SplitAt) {
    EXPECT_EQ(ROOT::SplitAt("", ' '), p("", ""));
    EXPECT_EQ(ROOT::SplitAt(",,,,", ','), p("", ",,,"));
 }
+
+TEST(StringUtils, WrapString)
+{
+   const auto input = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut "
+                      "labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco "
+                      "laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in "
+                      "voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat "
+                      "non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.";
+
+   EXPECT_EQ(ROOT::WrapString(input, 60),
+             R"(Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed
+do eiusmod tempor incididunt ut labore et dolore magna
+aliqua. Ut enim ad minim veniam, quis nostrud exercitation
+ullamco laboris nisi ut aliquip ex ea commodo consequat.
+Duis aute irure dolor in reprehenderit in voluptate velit
+esse cillum dolore eu fugiat nulla pariatur. Excepteur sint
+occaecat cupidatat non proident, sunt in culpa qui officia
+deserunt mollit anim id est laborum.)");
+   EXPECT_EQ(
+      ROOT::WrapString(input, 120),
+      R"(Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna
+aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis
+aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint
+occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.)");
+   EXPECT_EQ(ROOT::WrapString(input, 60, 10),
+             R"(Lorem ipsum dolor sit amet, consectetur adipiscing
+          elit, sed do eiusmod tempor incididunt ut labore
+          et dolore magna aliqua. Ut enim ad minim veniam,
+          quis nostrud exercitation ullamco laboris nisi ut
+          aliquip ex ea commodo consequat. Duis aute irure
+          dolor in reprehenderit in voluptate velit esse
+          cillum dolore eu fugiat nulla pariatur. Excepteur
+          sint occaecat cupidatat non proident, sunt in
+          culpa qui officia deserunt mollit anim id est
+          laborum.)");
+   EXPECT_EQ(ROOT::WrapString("A shorter string, just to get the point across...", 1),
+             R"(A
+shorter
+string,
+just
+to
+get
+the
+point
+across...)");
+   const auto shortStr = "Another short string, not long enough to be wrapped in this case";
+   EXPECT_EQ(ROOT::WrapString(shortStr, 200), shortStr);
+}
