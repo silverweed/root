@@ -71,6 +71,8 @@ enum class ENTupleMergeVersionBehavior {
    kAbortOnHigherVersion
 };
 
+class RNTupleMergeActions;
+
 /// Set of merging options to pass to RNTupleMerger.
 /// If you're using the merger through TFileMerger you need to give it string-based options instead.
 /// Here is the mapping for the TFileMerger options:
@@ -82,6 +84,15 @@ enum class ENTupleMergeVersionBehavior {
 ///   1. there must be no space between the separators (i.e. `.` and `=`)
 ///   2. all string matching is case insensitive
 struct RNTupleMergeOptions {
+   friend class RNTupleMerger;
+   
+private:
+   /// NOTE: actions are stored as shared_ptr for flexibility: today we could store them as raw pointers since they
+   /// only need to be available to the Merger for the duration of a single Merge call, but if in the future we want
+   /// to add an async Merge interface we need these to stay alive for a potentially "longer" period.
+   std::unordered_map<std::string_view, std::shared_ptr<RNTupleMergeActions>> fUserMergeActions;
+
+public:
    /// If fCompressionSettings is empty (the default), the merger will not change the
    /// compression of any of its sources (fast merging). Otherwise, all sources will be converted to the specified
    /// compression algorithm and level.
@@ -94,12 +105,25 @@ struct RNTupleMergeOptions {
    ENTupleMergeVersionBehavior fVersionBehavior = ENTupleMergeVersionBehavior::kWarnOnHigherVersion;
    /// If true, the merger will emit further diagnostics and information.
    bool fExtraVerbose = false;
+
+   template <typename T>
+   void AddAttributeMergeActions(std::string_view attrSetName, std::shared_ptr<T> actions)
+   {
+      static_assert(std::is_base_of_v<RNTupleMergeActions, T>, "actions' class must inherit from RNTupleMergeActions!");
+      auto [_it, inserted] =
+         fUserMergeActions.try_emplace(attrSetName, std::static_pointer_cast<RNTupleMergeActions>(actions));
+      if (!inserted) {
+         throw ROOT::RException(
+            R__FAIL("attribute set" + std::string(attrSetName) + " already has actions registered to it!"));
+      }
+   }
 };
 
 /// Information regarding the current slow merge process that gets passed to the RNTupleMergeActions
 struct RNTupleMergeActionContext {
    ROOT::NTupleSize_t fSourceEntryIndex = 0;
    ROOT::NTupleSize_t fDestinationEntryIndex = 0;
+   ROOT::RNTupleModel *fDstModel = nullptr;
 };
 
 enum class ENTupleMergeActionResult {

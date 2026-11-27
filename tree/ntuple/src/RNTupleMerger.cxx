@@ -1033,7 +1033,11 @@ public:
    // Invoked at the end of the whole process, just before committing the dataset
    virtual void BeforeCommit() = 0;
 };
+}
 
+namespace ROOT::Internal {
+
+// NOTE: Must be in ROOT::Internal to befriend REntry
 /// Merge Actions used internally to merge attributes.
 class RNTupleAttrMergeActions final : public RNTupleMergeActions {
    /// How much do we need to shift the _rangeStart field by. This changes on each new source (and is equal to the
@@ -1041,33 +1045,76 @@ class RNTupleAttrMergeActions final : public RNTupleMergeActions {
    ROOT::NTupleSize_t fAttrEntryStartOffset = 0;
    const RNTupleMergeStrategy &fParentStrategy;
    std::shared_ptr<ROOT::NTupleSize_t> fRangeStartPtr;
+   std::shared_ptr<RNTupleMergeActions> fUserActions;
+   std::unique_ptr<ROOT::RNTupleModel> fUserModel;
+   std::unique_ptr<ROOT::REntry> fScopedEntry;
 
 public:
-   RNTupleAttrMergeActions(const RNTupleMergeStrategy &parentStrategy, ROOT::NTupleSize_t initialStartOffset)
-      : fAttrEntryStartOffset(initialStartOffset), fParentStrategy(parentStrategy)
+   RNTupleAttrMergeActions(const RNTupleMergeStrategy &parentStrategy, ROOT::NTupleSize_t initialStartOffset,
+                           const std::shared_ptr<RNTupleMergeActions> &userActions)
+      : fAttrEntryStartOffset(initialStartOffset), fParentStrategy(parentStrategy), fUserActions(userActions)
    {
    }
 
-   ENTupleMergeActionResult OnFill(ROOT::REntry &entry, const RNTupleMergeActionContext &) final
+   ENTupleMergeActionResult OnFill(ROOT::REntry &metaEntry, const RNTupleMergeActionContext &ctx) final
    {
       using namespace ROOT::Internal::RNTupleAttributes;
 
       // Cache pointer per source
-      if (!fRangeStartPtr)
-         fRangeStartPtr = entry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]);
+      if (!fRangeStartPtr) {
+         fRangeStartPtr = metaEntry.GetPtr<ROOT::NTupleSize_t>(kMetaFieldNames[kMetaFieldIndex_RangeStart]);
+
+         // Reconstruct user model from the meta-model
+         fUserModel = ROOT::RNTupleModel::CreateBare();
+         const auto &subfields = ROOT::Internal::GetFieldZeroOfModel(*ctx.fDstModel).GetMutableSubfields();
+         const auto &userRootField = subfields[kMetaFieldIndex_UserData];
+         const auto &userFields = userRootField->GetMutableSubfields();
+         for (const auto &field : userFields) {
+            fUserModel->AddField(field->Clone(field->GetFieldName()));
+         }
+         fUserModel->Freeze();
+         fScopedEntry = fUserModel->CreateBareEntry();
+         const auto userDataValues = metaEntry.fValues[kMetaFieldIndex_UserData].GetField().SplitValue(
+            metaEntry.fValues[kMetaFieldIndex_UserData]
+         );
+         assert(userDataValues.size() == userFields.size());
+         for (auto i = 0u; i < userFields.size(); ++i) {
+            const auto &metaPtr = userDataValues[i].GetPtr<void>();
+            fScopedEntry->BindValue(userFields[i]->GetFieldName(), metaPtr);
+         }
+      }
+
+      auto result = ENTupleMergeActionResult::kEmit;
+      if (fUserActions)
+         result = fUserActions->OnFill(*fScopedEntry, ctx);
 
       // Shift _rangeStart field by the number of main entries we already written in the destination
       *fRangeStartPtr += fAttrEntryStartOffset;
-      return ENTupleMergeActionResult::kEmit;
+      return result;
    }
 
-   ENTupleMergeActionResult OnSourceEnd(ROOT::REntry &, const RNTupleMergeActionContext &) final
+   ENTupleMergeActionResult OnSourceEnd(ROOT::REntry &, const RNTupleMergeActionContext &ctx) final
    {
+      auto result = ENTupleMergeActionResult::kDrop;
+      if (fUserActions)
+         result = fUserActions->OnSourceEnd(*fScopedEntry, ctx);
+
       fAttrEntryStartOffset = fParentStrategy.GetNDstEntries();
       fRangeStartPtr = nullptr; // invalidate cached ptr every time we switch source
-      return ENTupleMergeActionResult::kDrop;
+      return result;
+   }
+
+   ENTupleMergeActionResult BeforeCommit(ROOT::REntry &, const RNTupleMergeActionContext &ctx) final
+   {
+      auto result = ENTupleMergeActionResult::kDrop;
+      if (fUserActions)
+         result = fUserActions->BeforeCommit(*fScopedEntry, ctx);
+      return result;
    }
 };
+}
+
+namespace {
 
 // =========================================================================================
 //
@@ -1693,6 +1740,7 @@ public:
          fDestination.Init(*fDstModel);
          fDstEntry = fDstModel->CreateEntry();
       }
+      fMergeContext.fDstModel = fDstModel.get();
    }
 
    [[nodiscard]] ROOT::RResult<void> ExtendDestinationModel(RDescriptorsComparison &descCmp) final
@@ -1722,6 +1770,9 @@ public:
 
       // TODO: this should happen more often than once at the end and it should depend on the target cluster size...
       if (fMergeContext.fDestinationEntryIndex > 0) {
+         for (auto &field : ROOT::Internal::GetFieldZeroOfModel(*fDstModel)) {
+            ROOT::Internal::CallFlushColumnsOnField(field);
+         }
          fDestination.CommitCluster(fMergeContext.fDestinationEntryIndex);
       }
    }
@@ -1907,10 +1958,11 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
 
       RAttrSetMergeData(std::unique_ptr<ROOT::Internal::RPagePersistentSink> attrSink,
                         const RNTupleMergeStrategy &parentStrategy, const RNTupleMergeOptions &mergeOpts,
-                        ROOT::NTupleSize_t initialStartOffset)
+                        ROOT::NTupleSize_t initialStartOffset,
+                        const std::shared_ptr<RNTupleMergeActions> &userActions)
          : fSink(std::move(attrSink)),
            fStrategy(nullptr, *fSink, mergeOpts,
-                     std::make_unique<RNTupleAttrMergeActions>(parentStrategy, initialStartOffset))
+                     std::make_unique<RNTupleAttrMergeActions>(parentStrategy, initialStartOffset, userActions))
       {
       }
    };
@@ -1995,8 +2047,10 @@ ROOT::RResult<void> RNTupleMerger::Merge(std::span<RPageSource *> sources, const
             auto sink =
                std::unique_ptr<ROOT::Internal::RPagePersistentSink>(static_cast<ROOT::Internal::RPagePersistentSink *>(
                   fDestination->CloneAsHidden(attrSetDesc.GetName(), sinkOpts).release()));
+            const auto &userActions = mergeOpts.fUserMergeActions[attrSetDesc.GetName()]; // might be nullptr
             auto [insertedIt, inserted] =
-               attrSetsData.try_emplace(attrSetDesc.GetName(), std::move(sink), *strat, mergeOpts, prevNEntries);
+               attrSetsData.try_emplace(attrSetDesc.GetName(), std::move(sink), *strat, mergeOpts, prevNEntries,
+                                        userActions);
             assert(inserted);
             attrSetDataIt = insertedIt;
          }

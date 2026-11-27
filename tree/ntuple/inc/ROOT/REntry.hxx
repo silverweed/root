@@ -39,6 +39,7 @@ struct RNTupleAttrEntry;
 }
 
 namespace Internal {
+class RNTupleAttrMergeActions;
 class RNTupleMergeStrategySlow;
 }
 
@@ -56,6 +57,7 @@ class REntry {
    friend class RNTupleFillContext;
    friend class RNTupleModel;
    friend class RNTupleReader;
+   friend class Internal::RNTupleAttrMergeActions;
    friend class Internal::RNTupleMergeStrategySlow;
    friend class RNTupleAttrSetReader;
    friend struct Internal::RNTupleAttrEntry;
